@@ -1,0 +1,41 @@
+name: tests
+
+# Run the QuantLab test suite on every push and pull request.
+# The suite is designed to be fast, deterministic, and OFFLINE (synthetic,
+# seeded fixtures — no network), so CI is reliable and quick.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install the package + test dependencies
+        # We install only what the test suite needs. Heavy/optional libraries
+        # used by the lesson SCRIPTS (vectorbt, quantstats, streamlit, xgboost,
+        # lightgbm, optuna) and TA-Lib's C library are intentionally NOT required
+        # for tests — TA-Lib-dependent tests skip cleanly via pytest.importorskip.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pytest hypothesis scikit-learn numba
+
+      - name: Run tests
+        run: pytest -q
