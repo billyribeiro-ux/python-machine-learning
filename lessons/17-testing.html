@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QuantLab — Testing & Quality at Scale</title>
+  <link rel="stylesheet" href="../assets/css/course.css" />
+</head>
+<body data-root="lessons" data-lesson-id="17-testing">
+  <div class="layout">
+    <nav class="sidebar"></nav>
+    <main class="content">
+      <div class="content-inner">
+
+        <p class="eyebrow">Module 17 · Putting It Together</p>
+        <h1>Testing & Quality at Scale</h1>
+        <p class="lead">Make correctness a habit: known-value indicator tests, property-based testing, backtest invariants, and the full multi-indicator stats regression that guards your edge.</p>
+        <div class="progress-pill" data-progress></div>
+
+        <div class="callout tryit">
+          <div class="callout-title">🚧 Full lesson in progress</div>
+          <p>
+            The course is being written module-by-module for maximum depth. This
+            lesson's detailed outline is below so you can see exactly what it will
+            cover — and the underlying <code>quantlab</code> package code it builds
+            on already exists and is tested. Modules 0–4 are complete and runnable;
+            work through those first.
+          </p>
+        </div>
+
+        <h2>What this lesson will cover</h2>
+                <h3>Known-value & cross-implementation tests</h3>
+        <p>What tests/test_indicators.py does: match our indicators to pandas and (optionally) TA-Lib, ignoring warmup NaNs.</p>
+        <h3>Property-based testing with Hypothesis</h3>
+        <p>Assert invariants over RANDOM inputs: RSI always in [0,100], ATR >= 0, SMA within [min,max] of its window, no look-ahead.</p>
+        <h3>Backtest invariants</h3>
+        <p>The leak guard (tests/test_strategy_stats.py): one-bar execution delay, costs only reduce returns, drawdown <= 0, equity reconciles with total return.</p>
+        <h3>Regression-testing the stats</h3>
+        <p>Pin the combo strategy's stats on fixed synthetic data so a refactor that changes results fails loudly.</p>
+        <h3>CI & coverage</h3>
+        <p>Running pytest on every change, skipping heavy/optional deps cleanly with importorskip, and keeping the suite fast and offline.</p>
+
+        <div class="callout better">
+          <div class="callout-title">🧱 Already in the repo</div>
+          <p>
+            The reusable building blocks for this module live in the
+            <code>quantlab/</code> package (data layer, indicators, backtest +
+            stats engine, strategy combiner) and are exercised by the
+            <code>tests/</code> suite. The lesson narration will show you how they
+            were built and how to extend them.
+          </p>
+        </div>
+
+        <div class="lesson-nav" data-lesson-nav></div>
+      </div>
+    </main>
+  </div>
+  <script src="../assets/js/manifest.js"></script>
+  <script src="../assets/js/course.js"></script>
+</body>
+</html>

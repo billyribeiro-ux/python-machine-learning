@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QuantLab — DuckDB: Your Market-Data Warehouse</title>
+  <link rel="stylesheet" href="../assets/css/course.css" />
+</head>
+<body data-root="lessons" data-lesson-id="04-duckdb">
+  <div class="layout">
+    <nav class="sidebar"></nav>
+    <main class="content">
+      <div class="content-inner">
+
+        <p class="eyebrow">Module 4 · Data Foundations</p>
+        <h1>DuckDB: Your Market-Data Warehouse</h1>
+        <p class="lead">
+          A scanner over thousands of symbols needs data that's organized, fast
+          to query, and bigger than RAM. DuckDB is an in-process analytical SQL
+          engine that reads parquet directly — no server, no import step. We use
+          it to turn a folder of parquet files into a queryable
+          <em>market-data lake</em> on your laptop.
+        </p>
+        <div class="progress-pill" data-progress></div>
+
+        <h2>1. "SQLite for analytics" — and why that's perfect here</h2>
+        <p>
+          DuckDB runs <em>inside</em> your Python process (like SQLite), but it's
+          column-oriented and vectorized for analytical queries (aggregations,
+          window functions, joins over millions of rows). Crucially, it queries
+          parquet and even pandas/Polars DataFrames <strong>in place</strong> —
+          the files are the database. No ETL, no copying gigabytes into a server.
+        </p>
+        <div class="code-block" data-filename="m4_hello.py">
+<textarea class="src">import duckdb
+import pandas as pd
+from quantlab.data import get_provider
+
+spy = get_provider("yahoo").get_ohlcv("SPY", start="2023-01-01").reset_index()
+
+# DuckDB can query a pandas DataFrame by name — zero copy, just point at it.
+con = duckdb.connect()
+out = con.execute("""
+    SELECT date_trunc('month', timestamp) AS month,
+           count(*)               AS bars,
+           avg(close)             AS avg_close,
+           max(high) - min(low)   AS range
+    FROM spy
+    GROUP BY 1
+    ORDER BY 1
+""").df()                       # .df() returns a pandas DataFrame
+print(out.tail(4))</textarea>
+        </div>
+        <div class="callout deepdive">
+          <div class="callout-title">🔬 Why SQL, when you know pandas/Polars?</div>
+          <p>
+            Three reasons a principal engineer keeps SQL in the toolkit: (1) it
+            scales to larger-than-RAM parquet by <em>streaming</em>; (2) window
+            functions over partitions express per-symbol rolling logic
+            declaratively and run in C++; (3) the <em>same</em> query works on 1
+            symbol or 10,000, and is portable to a real warehouse later. SQL is
+            the lingua franca your data infrastructure will eventually speak.
+          </p>
+        </div>
+
+        <h2>2. Parquet: the storage format that makes this fast</h2>
+        <p>
+          Parquet is columnar, compressed, and self-describing. Storing OHLCV as
+          parquet (instead of CSV) means a query for just <code>close</code> reads
+          only the close column off disk, and a query for one symbol reads only
+          that symbol's file. We <strong>partition</strong> by timeframe and
+          symbol so DuckDB can prune entire files it doesn't need.
+        </p>
+        <div class="code-block" data-filename="code/m4_build_lake.py">
+<textarea class="src">"""Build a partitioned parquet 'data lake' and query it with DuckDB.
+
+Run:  python code/m4_build_lake.py
+"""
+from quantlab.data import get_provider
+from quantlab.data.cache import MarketDataLake
+
+provider = get_provider("yahoo")
+lake = MarketDataLake(root="data/lake")     # data/lake/timeframe=1d/symbol=XXX/
+
+# Ingest a universe once; thereafter queries are instant and offline.
+universe = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL"]
+rows = lake.ingest(provider, universe, start="2015-01-01", timeframe="1d")
+print(f"Ingested {rows:,} bars across {len(universe)} symbols.")
+
+# Query the WHOLE lake with one SQL statement. The macro 'lake' expands to a
+# partitioned read_parquet(...) under the hood (see quantlab/data/cache.py).
+latest = lake.query("""
+    SELECT symbol, last(close ORDER BY timestamp) AS last_close,
+           count(*) AS bars
+    FROM lake
+    GROUP BY symbol
+    ORDER BY symbol
+""")
+print(latest)</textarea>
+        </div>
+
+        <h2>3. Window functions: per-symbol indicators in SQL</h2>
+        <p>
+          SQL window functions are the database world's answer to Polars'
+          <code>.over()</code>: <code>OVER (PARTITION BY symbol ORDER BY
+          timestamp ROWS BETWEEN n PRECEDING AND CURRENT ROW)</code> computes a
+          rolling statistic per symbol, in time order, looking only backward (no
+          leak). The same query computes a 20-day SMA for every symbol at once.
+        </p>
+        <div class="code-block" data-filename="code/m4_windows_sql.py">
+<textarea class="src">"""Rolling indicators for an entire universe, expressed once in SQL.
+
+Run:  python code/m4_windows_sql.py  (after m4_build_lake.py)
+"""
+from quantlab.data.cache import MarketDataLake
+
+lake = MarketDataLake(root="data/lake")
+
+sql = """
+WITH feats AS (
+    SELECT
+        symbol, timestamp, close,
+        -- 20-day SMA, per symbol, backward-looking window (no look-ahead):
+        avg(close) OVER w20  AS sma20,
+        -- 20-day population stddev for a z-score:
+        stddev_pop(close) OVER w20 AS sd20,
+        -- 20-day momentum: close / close 20 bars ago - 1
+        close / lag(close, 20) OVER (PARTITION BY symbol ORDER BY timestamp) - 1
+                                AS mom20
+    FROM lake
+    WINDOW w20 AS (PARTITION BY symbol ORDER BY timestamp
+                   ROWS BETWEEN 19 PRECEDING AND CURRENT ROW)
+)
+SELECT symbol, timestamp, close, sma20,
+       (close - sma20) / nullif(sd20, 0) AS zscore,   -- nullif guards /0
+       mom20
+FROM feats
+QUALIFY row_number() OVER (PARTITION BY symbol ORDER BY timestamp DESC) = 1
+ORDER BY mom20 DESC
+"""
+print("Latest per-symbol snapshot, ranked by 20-day momentum:")
+print(lake.query(sql))</textarea>
+        </div>
+        <div class="callout deepdive">
+          <div class="callout-title">🔬 <code>QUALIFY</code> and named <code>WINDOW</code> clauses</div>
+          <p>
+            Two touches that mark fluent SQL: a named <code>WINDOW w20 AS (...)</code>
+            defines the frame once and reuses it (DRY, and the optimizer computes
+            it once); <code>QUALIFY</code> filters on a window function's result
+            (here: keep only the latest row per symbol) without a subquery. DuckDB
+            supports both. Clean SQL is as much an engineering signal as clean
+            Python.
+          </p>
+        </div>
+
+        <h2>4. Joins: combine price with anything</h2>
+        <p>
+          The real power of SQL is relating datasets: prices to a sector map,
+          signals to fundamentals, your fills to a benchmark. Here we join each
+          symbol's bars to the market (SPY) to compute a simple relative-strength
+          line — outperformers float to the top of a scanner.
+        </p>
+        <div class="code-block" data-filename="code/m4_join_benchmark.py">
+<textarea class="src">"""Relative strength vs SPY via a SQL join over the lake.
+
+Run:  python code/m4_join_benchmark.py  (after m4_build_lake.py)
+"""
+from quantlab.data.cache import MarketDataLake
+
+lake = MarketDataLake(root="data/lake")
+
+sql = """
+WITH px AS (SELECT symbol, timestamp, close FROM lake),
+     bench AS (SELECT timestamp, close AS spy FROM lake WHERE symbol = 'SPY')
+SELECT p.symbol,
+       p.timestamp,
+       p.close / b.spy AS rs            -- relative strength ratio vs SPY
+FROM px p
+JOIN bench b USING (timestamp)
+WHERE p.symbol <> 'SPY'
+QUALIFY row_number() OVER (PARTITION BY p.symbol ORDER BY p.timestamp DESC) = 1
+ORDER BY rs DESC
+"""
+print("Relative strength vs SPY (latest):")
+print(lake.query(sql))</textarea>
+        </div>
+
+        <div class="callout better">
+          <div class="callout-title">🧱 The warehouse pattern, in your pocket</div>
+          <p>
+            <code>MarketDataLake</code> (in <code>quantlab/data/cache.py</code>)
+            gives you the architecture real quant platforms use — partitioned
+            columnar storage queried by a vectorized SQL engine — shrunk to a
+            laptop and fed by the same provider-agnostic data layer. A nightly
+            <code>lake.ingest(...)</code> keeps it fresh; everything downstream
+            (scanners in Module 14, ML features in Module 11) reads from it. You
+            built a data platform, not just a script.
+          </p>
+        </div>
+
+        <div class="callout pitfall">
+          <div class="callout-title">⚠️ Timestamps, types, and partitions</div>
+          <p>
+            Two things to watch: store <code>timestamp</code> as a real timestamp
+            type (not a string) so <code>ORDER BY</code> and date functions work;
+            and keep partition cardinality sane — one parquet file per symbol per
+            timeframe is great, one tiny file per <em>day</em> per symbol creates
+            thousands of files and slows scans. Our lake partitions by
+            <code>timeframe</code> then <code>symbol</code>, which is the sweet
+            spot for symbol-oriented queries.
+          </p>
+        </div>
+
+        <div class="callout tryit">
+          <div class="callout-title">🛠️ Try it</div>
+          <p>
+            Add a query to <code>m4_windows_sql.py</code> that returns, for each
+            symbol, the count of days where the 20-day z-score exceeded +2 (an
+            overbought tally) over the last year. Hint: compute the z-score in a
+            CTE, then <code>WHERE timestamp &gt;= current_date - INTERVAL 1 YEAR</code>
+            and <code>GROUP BY symbol</code>. You've just written the core of a
+            cross-sectional scanner in pure SQL.
+          </p>
+        </div>
+
+        <div class="callout concept">
+          <div class="callout-title">✅ You now master</div>
+          <p>
+            DuckDB as an in-process analytical engine, parquet as fast columnar
+            storage, a partitioned data-lake layout, per-symbol rolling
+            indicators via SQL window functions, and joins to combine prices with
+            benchmarks and metadata. Your data foundation is complete. Next we
+            turn to the indicators themselves at industrial scale, starting with
+            <strong>TA-Lib</strong>.
+          </p>
+        </div>
+
+        <div class="lesson-nav" data-lesson-nav></div>
+      </div>
+    </main>
+  </div>
+  <script src="../assets/js/manifest.js"></script>
+  <script src="../assets/js/course.js"></script>
+</body>
+</html>

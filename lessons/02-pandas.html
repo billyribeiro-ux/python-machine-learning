@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QuantLab — pandas for Market Data</title>
+  <link rel="stylesheet" href="../assets/css/course.css" />
+</head>
+<body data-root="lessons" data-lesson-id="02-pandas">
+  <div class="layout">
+    <nav class="sidebar"></nav>
+    <main class="content">
+      <div class="content-inner">
+
+        <p class="eyebrow">Module 2 · Data Foundations</p>
+        <h1>pandas for Market Data</h1>
+        <p class="lead">
+          NumPy gives you speed; pandas gives you a <em>labeled, time-aware</em>
+          home for that speed. Master the DatetimeIndex, resampling, rolling/ewm,
+          groupby, and multi-asset alignment — plus the three pitfalls (chained
+          indexing, copy-vs-view, and look-ahead) that quietly corrupt results —
+          and you can wrangle any market dataset with confidence.
+        </p>
+        <div class="progress-pill" data-progress></div>
+
+        <h2>1. The index is the whole game</h2>
+        <p>
+          In ordinary data work the row index is an afterthought. In time-series
+          finance it is <em>the</em> feature: it carries time, timezone, and
+          frequency, and pandas uses it to <strong>align</strong> data
+          automatically. Two series with different dates add together by matching
+          timestamps, not positions — which is exactly what you want across
+          assets with different trading calendars, and exactly what bites you if
+          you don't expect it.
+        </p>
+        <div class="code-block" data-filename="m2_index.py">
+<textarea class="src">import pandas as pd
+from quantlab.data import get_provider
+
+spy = get_provider("yahoo").get_ohlcv("SPY", start="2023-01-01")
+print(type(spy.index))            # DatetimeIndex
+print("tz   :", spy.index.tz)     # UTC (our data layer guarantees this)
+print("freq :", spy.index.inferred_freq)   # may be None for trading days (gaps)
+
+# Alignment in action: AAPL and a crypto symbol trade on different calendars.
+aapl = get_provider("yahoo").get_ohlcv("AAPL", start="2023-01-01")["close"]
+btc  = get_provider("yahoo").get_ohlcv("BTC-USD", start="2023-01-01")["close"]
+
+# Adding them aligns by timestamp; weekends (BTC trades, AAPL doesn't) -> NaN.
+combo = aapl + btc
+print("aligned rows:", len(combo), "| NaNs from calendar mismatch:", combo.isna().sum())</textarea>
+        </div>
+        <div class="callout deepdive">
+          <div class="callout-title">🔬 Timezones are a correctness issue, not a nicety</div>
+          <p>
+            A "9:30 AM" bar means nothing without a timezone. Mixing tz-naive and
+            tz-aware timestamps raises errors in modern pandas (good — it's
+            refusing to guess). Our data layer normalizes everything to
+            <strong>UTC</strong> so math is unambiguous; convert to exchange-local
+            time only for <em>display</em> with
+            <code>df.tz_convert("America/New_York")</code>. Store in UTC, present
+            in local — the same rule every serious system uses.
+          </p>
+        </div>
+
+        <h2>2. Resampling: change the timeframe correctly</h2>
+        <p>
+          Aggregating bars (1-minute → 5-minute, daily → weekly) is not averaging
+          — OHLCV has <em>rules</em>: open is the first, high is the max, low is
+          the min, close is the last, volume is the sum. Get this wrong and every
+          downstream indicator is subtly off. pandas' <code>resample</code> with a
+          per-column aggregation does it correctly.
+        </p>
+        <div class="code-block" data-filename="code/m2_resample.py">
+<textarea class="src">"""Resample OHLCV the RIGHT way (open=first, high=max, low=min, close=last).
+
+Run:  python code/m2_resample.py
+"""
+import pandas as pd
+from quantlab.data import get_provider
+
+daily = get_provider("yahoo").get_ohlcv("SPY", start="2022-01-01")
+
+# The canonical OHLCV aggregation map — memorize this.
+OHLCV_AGG = {
+    "open":   "first",
+    "high":   "max",
+    "low":    "min",
+    "close":  "last",
+    "volume": "sum",
+}
+
+# Daily -> weekly bars (label by week-ending Friday).
+weekly = daily.resample("W-FRI").agg(OHLCV_AGG).dropna()
+print("daily rows :", len(daily), "-> weekly rows:", len(weekly))
+print(weekly.tail(3))
+
+# Sanity: a weekly bar's high must be >= all its daily highs in that week.
+wk = weekly.index[-1]
+days_in_wk = daily.loc[(daily.index <= wk) & (daily.index > weekly.index[-2])]
+assert weekly["high"].iloc[-1] + 1e-9 >= days_in_wk["high"].max()
+print("OHLC aggregation verified: weekly high >= constituent daily highs")</textarea>
+        </div>
+        <div class="callout pitfall">
+          <div class="callout-title">⚠️ Don't <code>.mean()</code> your OHLC</div>
+          <p>
+            A surprising amount of code resamples with a single
+            <code>.mean()</code> or <code>.last()</code> for all columns. That
+            destroys the high/low (you lose the actual range) and fabricates an
+            "open" that never traded. Always aggregate column-by-column. The same
+            <code>OHLCV_AGG</code> map works for any timeframe pair.
+          </p>
+        </div>
+
+        <h2>3. Rolling, expanding, and EWM</h2>
+        <p>
+          These three are the heart of indicator construction in pandas.
+          <strong>Rolling</strong> = fixed look-back window.
+          <strong>Expanding</strong> = everything up to now (anchored).
+          <strong>EWM</strong> = exponential decay (recent bars weighted more).
+          All three are window-aware and, critically, all three only look
+          <em>backward</em> — they never peek ahead.
+        </p>
+        <div class="code-block" data-filename="m2_windows.py">
+<textarea class="src">import pandas as pd
+from quantlab.data import get_provider
+
+c = get_provider("yahoo").get_ohlcv("AAPL", start="2021-01-01")["close"]
+
+feat = pd.DataFrame({"close": c})
+feat["sma20"]      = c.rolling(20).mean()                 # fixed 20-day window
+feat["vol20"]      = c.pct_change().rolling(20).std()     # 20-day realized vol
+feat["ewma20"]     = c.ewm(span=20, adjust=False).mean()  # exponential MA
+feat["all_time_hi"]= c.expanding().max()                  # running peak (for DD)
+feat["pct_from_hi"]= c / feat["all_time_hi"] - 1          # drawdown from peak
+
+# min_periods controls how much history you DEMAND before emitting a value.
+# Default for rolling is window length -> honest NaN warmup (no look-ahead).
+print(feat.tail(3).round(2))
+print("\nCurrent drawdown from all-time high:", f"{feat['pct_from_hi'].iloc[-1]:.1%}")</textarea>
+        </div>
+
+        <h2>4. groupby: per-symbol operations done right</h2>
+        <p>
+          The tidy/long panel from <code>get_ohlcv_multi</code> stacks many
+          symbols in one frame. To compute an indicator <em>per symbol</em> you
+          must group by symbol first — otherwise a rolling mean bleeds AAPL's
+          prices into MSFT's. <code>groupby(...).transform()</code> keeps the
+          original shape, which is what you want for adding feature columns.
+        </p>
+        <div class="code-block" data-filename="code/m2_groupby.py">
+<textarea class="src">"""Per-symbol indicators on a tidy multi-asset panel (no cross-contamination).
+
+Run:  python code/m2_groupby.py
+"""
+import pandas as pd
+from quantlab.data import get_provider
+
+panel = get_provider("yahoo").get_ohlcv_multi(
+    ["SPY", "QQQ", "AAPL", "MSFT"], start="2022-01-01"
+)
+
+# WRONG (commented): a global rolling mean mixes symbols at their boundaries.
+# panel["sma20"] = panel["close"].rolling(20).mean()   # <-- bug!
+
+# RIGHT: group by symbol, THEN roll. transform() returns a same-length column.
+g = panel.groupby("symbol", group_keys=False)
+panel["sma20"]  = g["close"].transform(lambda s: s.rolling(20).mean())
+panel["ret"]    = g["close"].transform(lambda s: s.pct_change())
+panel["vol20"]  = g["ret"].transform(lambda s: s.rolling(20).std())
+panel["mom20"]  = g["close"].transform(lambda s: s.pct_change(20))
+
+# Cross-sectional view: one row per symbol on the latest day, ranked by momentum.
+latest = panel.groupby("symbol").tail(1).copy()
+print(latest[["symbol", "close", "sma20", "vol20", "mom20"]]
+      .round(3).to_string(index=False))</textarea>
+        </div>
+        <div class="callout pitfall">
+          <div class="callout-title">⚠️ The #1 multi-asset bug</div>
+          <p>
+            Running a rolling/shift/pct_change on a stacked panel <em>without</em>
+            grouping leaks one symbol's data into the next at the seams. The
+            result looks fine (right shape, plausible numbers) and is wrong.
+            Rule: on a long panel, every time-series op is preceded by
+            <code>groupby("symbol")</code>.
+          </p>
+        </div>
+
+        <h2>5. The three classic pandas traps</h2>
+        <h3>Trap A — chained indexing &amp; <code>SettingWithCopyWarning</code></h3>
+        <div class="code-block" data-filename="m2_chained.py">
+<textarea class="src">import pandas as pd
+from quantlab.data import get_provider
+
+df = get_provider("yahoo").get_ohlcv("SPY", start="2024-01-01").copy()
+
+# WRONG: chained indexing — df[mask] may return a COPY, so the assignment can
+# silently do nothing (and warns). Two separate __getitem__/__setitem__ calls.
+# df[df["close"] > df["open"]]["signal"] = 1     # <-- unreliable, avoid
+
+# RIGHT: a single .loc call addresses rows AND column atomically.
+df["signal"] = 0
+df.loc[df["close"] > df["open"], "signal"] = 1   # up-day flag, set in place
+print("up days:", int(df["signal"].sum()), "of", len(df))</textarea>
+        </div>
+        <h3>Trap B — copy vs view</h3>
+        <p>
+          Slicing sometimes returns a view (shares memory) and sometimes a copy.
+          If you intend to modify a subset as its own object, call
+          <code>.copy()</code> explicitly. Ambiguity here is the source of most
+          "why didn't my change stick?" bugs.
+        </p>
+        <h3>Trap C — look-ahead via shift (the dangerous one)</h3>
+        <div class="code-block" data-filename="code/m2_lookahead.py">
+<textarea class="src">"""Signals decide on bar t and act on bar t+1. Prove the gap with real data.
+
+Run:  python code/m2_lookahead.py
+"""
+import pandas as pd
+from quantlab.data import get_provider
+from quantlab.utils import forward_returns
+
+px = get_provider("yahoo").get_ohlcv("QQQ", start="2016-01-01")
+c = px["close"]
+
+# A simple regime signal known only at each day's close.
+signal = (c > c.rolling(100).mean()).astype(int)
+ret = c.pct_change()
+
+leaky  = (signal * ret).fillna(0)             # WRONG: same-bar -> peeks
+honest = (signal.shift(1) * ret).fillna(0)    # RIGHT: act next bar
+
+print(f"Leaky cumulative   : {(1+leaky).prod()-1:7.1%}  <- not achievable")
+print(f"Honest cumulative  : {(1+honest).prod()-1:7.1%}  <- tradeable")
+
+# For ML, the LABEL is the forward return (future), attached to today's row.
+px["target_5d"] = forward_returns(c, horizon=5)
+print("\nLabel (forward 5d return) is NaN at the tail (future unknown):")
+print(px["target_5d"].tail(6).round(4))</textarea>
+        </div>
+        <div class="callout better">
+          <div class="callout-title">🧱 Make the safe path the easy path</div>
+          <p>
+            We never re-derive the shift by hand in strategy code. Backward-safe
+            signals use <code>.shift(1)</code> at the one place signals become
+            positions; ML labels use <code>quantlab.utils.forward_returns</code>,
+            which builds the future-looking target and leaves NaNs at the tail so
+            you literally cannot train on rows whose outcome isn't known yet. The
+            best way to avoid a bug class is to encapsulate the correct version.
+          </p>
+        </div>
+
+        <h2>6. A small end-to-end feature frame</h2>
+        <p>
+          Tying it together: pull data through the provider, build a tidy feature
+          set with correct windows and no leakage. This is the exact shape we'll
+          feed to scikit-learn in Module 11.
+        </p>
+        <div class="code-block" data-filename="code/m2_features.py">
+<textarea class="src">"""A clean, leak-free feature frame — the template for ML modules.
+
+Run:  python code/m2_features.py
+"""
+import numpy as np
+import pandas as pd
+from quantlab.data import get_provider
+from quantlab.utils import forward_returns
+
+px = get_provider("yahoo").get_ohlcv("SPY", start="2010-01-01")
+c, h, l, v = px["close"], px["high"], px["low"], px["volume"]
+
+X = pd.DataFrame(index=px.index)
+X["ret1"]   = c.pct_change()
+X["ret5"]   = c.pct_change(5)
+X["vol20"]  = X["ret1"].rolling(20).std()
+X["sma_gap"]= c / c.rolling(50).mean() - 1            # distance from trend
+X["rng"]    = (h - l) / c                             # daily range, normalized
+X["dvol"]   = (c * v).rolling(20).mean()              # dollar volume (liquidity)
+
+# Target: does price rise over the NEXT 5 days? (classification label)
+y = (forward_returns(c, 5) > 0).astype("float")
+
+data = X.join(y.rename("up_5d")).dropna()             # dropna aligns + removes warmup/tail
+print("feature matrix:", data.shape)
+print("base rate (P[up in 5d]):", f"{data['up_5d'].mean():.1%}")
+print(data.tail(3).round(4))</textarea>
+        </div>
+
+        <div class="callout tryit">
+          <div class="callout-title">🛠️ Try it</div>
+          <p>
+            Extend <code>m2_features.py</code> with an intraday twist: pull
+            <code>timeframe="5m"</code> for the last ~30 days, resample to 30-minute
+            bars with the <code>OHLCV_AGG</code> map, and compute the same
+            features. Confirm that <em>nothing</em> about your feature code had to
+            change except the data call — that's the timeframe-agnostic design
+            paying off.
+          </p>
+        </div>
+
+        <div class="callout concept">
+          <div class="callout-title">✅ You now master</div>
+          <p>
+            The DatetimeIndex and automatic alignment, correct OHLCV resampling,
+            rolling/expanding/EWM windows, per-symbol groupby on tidy panels, the
+            three classic traps, and a leak-free feature frame. pandas is
+            ergonomic but single-threaded and memory-hungry at scale. Next:
+            <strong>Polars</strong>, where the same ideas run multi-core and
+            multi-symbol in one blazing pass.
+          </p>
+        </div>
+
+        <div class="lesson-nav" data-lesson-nav></div>
+      </div>
+    </main>
+  </div>
+  <script src="../assets/js/manifest.js"></script>
+  <script src="../assets/js/course.js"></script>
+</body>
+</html>

@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QuantLab — Options: Chains, IV & Greeks</title>
+  <link rel="stylesheet" href="../assets/css/course.css" />
+</head>
+<body data-root="lessons" data-lesson-id="15-options">
+  <div class="layout">
+    <nav class="sidebar"></nav>
+    <main class="content">
+      <div class="content-inner">
+
+        <p class="eyebrow">Module 15 · Putting It Together</p>
+        <h1>Options: Chains, IV & Greeks</h1>
+        <p class="lead">Bring options into QuantLab: pull chains through the provider, compute implied volatility and greeks, and scan for setups.</p>
+        <div class="progress-pill" data-progress></div>
+
+        <div class="callout tryit">
+          <div class="callout-title">🚧 Full lesson in progress</div>
+          <p>
+            The course is being written module-by-module for maximum depth. This
+            lesson's detailed outline is below so you can see exactly what it will
+            cover — and the underlying <code>quantlab</code> package code it builds
+            on already exists and is tested. Modules 0–4 are complete and runnable;
+            work through those first.
+          </p>
+        </div>
+
+        <h2>What this lesson will cover</h2>
+                <h3>Options data via the provider</h3>
+        <p>get_options_chain (already implemented on YahooProvider) returns a tidy calls+puts frame tagged by type and expiry.</p>
+        <h3>Black-Scholes & implied volatility</h3>
+        <p>Pricing, solving for IV, and the greeks (delta, gamma, theta, vega) from scratch — vectorized in NumPy.</p>
+        <h3>The volatility surface</h3>
+        <p>IV across strikes/expiries, skew, and term structure; building and visualizing the surface.</p>
+        <h3>Simple options strategies</h3>
+        <p>Covered calls, verticals, and their payoff/risk profiles, evaluated with our stats engine.</p>
+        <h3>Options scanners</h3>
+        <p>Screening for high-IV-rank premium selling or cheap convexity, ranked across underlyings.</p>
+
+        <div class="callout better">
+          <div class="callout-title">🧱 Already in the repo</div>
+          <p>
+            The reusable building blocks for this module live in the
+            <code>quantlab/</code> package (data layer, indicators, backtest +
+            stats engine, strategy combiner) and are exercised by the
+            <code>tests/</code> suite. The lesson narration will show you how they
+            were built and how to extend them.
+          </p>
+        </div>
+
+        <div class="lesson-nav" data-lesson-nav></div>
+      </div>
+    </main>
+  </div>
+  <script src="../assets/js/manifest.js"></script>
+  <script src="../assets/js/course.js"></script>
+</body>
+</html>

@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QuantLab — Streamlit Trading Dashboard</title>
+  <link rel="stylesheet" href="../assets/css/course.css" />
+</head>
+<body data-root="lessons" data-lesson-id="16-streamlit">
+  <div class="layout">
+    <nav class="sidebar"></nav>
+    <main class="content">
+      <div class="content-inner">
+
+        <p class="eyebrow">Module 16 · Putting It Together</p>
+        <h1>Streamlit Trading Dashboard</h1>
+        <p class="lead">Tie everything together into an interactive app: a live scanner, a backtest explorer, ML predictions, and QuantStats tearsheets — all driven by the quantlab package.</p>
+        <div class="progress-pill" data-progress></div>
+
+        <div class="callout tryit">
+          <div class="callout-title">🚧 Full lesson in progress</div>
+          <p>
+            The course is being written module-by-module for maximum depth. This
+            lesson's detailed outline is below so you can see exactly what it will
+            cover — and the underlying <code>quantlab</code> package code it builds
+            on already exists and is tested. Modules 0–4 are complete and runnable;
+            work through those first.
+          </p>
+        </div>
+
+        <h2>What this lesson will cover</h2>
+                <h3>Streamlit fundamentals</h3>
+        <p>Widgets, layout, and st.cache_data for fast, reactive apps without re-fetching data.</p>
+        <h3>The scanner page</h3>
+        <p>Pick a universe and settings, run the Module 14 scan, show a ranked, sortable table with sparklines.</p>
+        <h3>The backtest explorer</h3>
+        <p>Sliders for the combo strategy's settings -> live equity curve, drawdown, and the stats bundle from quantlab.backtest.</p>
+        <h3>The ML page</h3>
+        <p>Show model predictions, feature importance/SHAP, and predicted-vs-realized performance.</p>
+        <h3>Deployment</h3>
+        <p>Caching, secrets for real data providers, and running it locally or on Streamlit Community Cloud.</p>
+
+        <div class="callout better">
+          <div class="callout-title">🧱 Already in the repo</div>
+          <p>
+            The reusable building blocks for this module live in the
+            <code>quantlab/</code> package (data layer, indicators, backtest +
+            stats engine, strategy combiner) and are exercised by the
+            <code>tests/</code> suite. The lesson narration will show you how they
+            were built and how to extend them.
+          </p>
+        </div>
+
+        <div class="lesson-nav" data-lesson-nav></div>
+      </div>
+    </main>
+  </div>
+  <script src="../assets/js/manifest.js"></script>
+  <script src="../assets/js/course.js"></script>
+</body>
+</html>

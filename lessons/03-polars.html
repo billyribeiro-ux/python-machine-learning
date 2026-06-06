@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QuantLab — Polars for Speed &amp; Scale</title>
+  <link rel="stylesheet" href="../assets/css/course.css" />
+</head>
+<body data-root="lessons" data-lesson-id="03-polars">
+  <div class="layout">
+    <nav class="sidebar"></nav>
+    <main class="content">
+      <div class="content-inner">
+
+        <p class="eyebrow">Module 3 · Data Foundations</p>
+        <h1>Polars for Speed &amp; Scale</h1>
+        <p class="lead">
+          When "5,000 symbols × 10 years of minute bars" no longer fits pandas'
+          patience or your RAM, Polars takes over: a multi-threaded, Arrow-backed
+          DataFrame with a lazy query optimizer. The mental shift is from
+          <em>imperative</em> (do this, then that) to <em>expressions</em>
+          (declare what each column is; let the engine plan it).
+        </p>
+        <div class="progress-pill" data-progress></div>
+
+        <h2>1. Why Polars exists</h2>
+        <p>
+          pandas is brilliant and single-threaded. Its operations often
+          materialize intermediate copies, and it predates Apache Arrow. Polars
+          is built on Arrow's columnar memory, runs across all your CPU cores,
+          and — in lazy mode — looks at your <em>entire</em> query before
+          executing, so it can reorder filters, drop unused columns
+          (projection pushdown), and avoid materializing intermediates.
+        </p>
+        <table>
+          <tr><th></th><th>pandas</th><th>Polars</th></tr>
+          <tr><td>Parallelism</td><td>single-threaded</td><td>all cores</td></tr>
+          <tr><td>Memory model</td><td>NumPy blocks</td><td>Apache Arrow</td></tr>
+          <tr><td>Execution</td><td>eager only</td><td>eager <em>and</em> lazy (optimized)</td></tr>
+          <tr><td>API style</td><td>indexing &amp; methods</td><td>expressions</td></tr>
+          <tr><td>Larger-than-RAM</td><td>no</td><td>streaming engine</td></tr>
+        </table>
+
+        <h2>2. Expressions: the core idea</h2>
+        <p>
+          A Polars <strong>expression</strong> (<code>pl.col("close")...</code>)
+          is a recipe for a column, not the column itself. You hand a list of
+          recipes to <code>select</code> / <code>with_columns</code> and Polars
+          runs them in parallel. This is why there's no per-row Python and no
+          index gymnastics — you describe columns, the engine does the work.
+        </p>
+        <div class="code-block" data-filename="m3_expressions.py">
+<textarea class="src">import polars as pl
+from quantlab.data import get_provider
+
+# Our data layer returns pandas; convert once. (Polars reads parquet natively
+# too — Module 4 skips pandas entirely for the warehouse.)
+pdf = get_provider("yahoo").get_ohlcv("SPY", start="2022-01-01").reset_index()
+df = pl.from_pandas(pdf)            # columns: timestamp, open, high, low, close, volume
+
+out = df.with_columns(
+    ret      = pl.col("close").pct_change(),
+    sma20    = pl.col("close").rolling_mean(window_size=20),
+    vol20    = pl.col("close").pct_change().rolling_std(window_size=20),
+    # when/then/otherwise is Polars' vectorized if-else (no apply, no loop):
+    regime   = pl.when(pl.col("close") > pl.col("close").rolling_mean(50))
+                 .then(pl.lit("bull"))
+                 .otherwise(pl.lit("bear")),
+)
+print(out.tail(3).select("timestamp", "close", "sma20", "vol20", "regime"))</textarea>
+        </div>
+        <div class="callout deepdive">
+          <div class="callout-title">🔬 <code>when/then/otherwise</code> &gt; <code>apply</code></div>
+          <p>
+            Anytime you reach for <code>.apply(lambda ...)</code> you've dropped
+            back into slow Python. Polars' <code>when().then().otherwise()</code>
+            expresses branching <em>as data</em>, so it stays vectorized and
+            parallel. Most "I need a loop" moments in indicator code are actually
+            a <code>when/then</code> in disguise.
+          </p>
+        </div>
+
+        <h2>3. Per-symbol windows in ONE pass (the killer feature)</h2>
+        <p>
+          Remember the Module 2 rule: on a stacked panel you must group before
+          any rolling op. Polars makes this a first-class, parallel operation
+          with <code>.over("symbol")</code> — a window expression that computes
+          per group without breaking the frame apart. One expression, every
+          symbol, all cores.
+        </p>
+        <div class="code-block" data-filename="code/m3_multisymbol.py">
+<textarea class="src">"""Per-symbol indicators across a whole universe in a single parallel pass.
+
+Run:  python code/m3_multisymbol.py
+"""
+import polars as pl
+from quantlab.data import get_provider
+
+universe = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL"]
+pdf = get_provider("yahoo").get_ohlcv_multi(universe, start="2021-01-01").reset_index()
+df = pl.from_pandas(pdf).sort(["symbol", "timestamp"])
+
+# .over("symbol") = "compute this rolling/shift WITHIN each symbol". This is the
+# leak-free, multi-asset equivalent of pandas groupby().transform() — but the
+# groups run in parallel and the syntax is one line per feature.
+feat = df.with_columns(
+    ret    = pl.col("close").pct_change().over("symbol"),
+    sma20  = pl.col("close").rolling_mean(20).over("symbol"),
+    sma50  = pl.col("close").rolling_mean(50).over("symbol"),
+    mom20  = pl.col("close").pct_change(20).over("symbol"),
+    vol20  = pl.col("close").pct_change().rolling_std(20).over("symbol"),
+)
+
+# Cross-sectional momentum ranking on the latest date — a scanner in embryo.
+latest_date = feat.select(pl.col("timestamp").max()).item()
+snapshot = (
+    feat.filter(pl.col("timestamp") == latest_date)
+        .select("symbol", "close", "mom20", "vol20")
+        .sort("mom20", descending=True)
+)
+print("Momentum leaderboard (20-day) as of", str(latest_date)[:10])
+print(snapshot)</textarea>
+        </div>
+        <div class="callout better">
+          <div class="callout-title">🧱 Why this beats the pandas version</div>
+          <p>
+            The pandas equivalent needs <code>groupby(...).transform(lambda ...)</code>
+            for each feature, each one a Python-level callback per group. Polars'
+            <code>.over("symbol")</code> is a native windowed expression: no
+            Python callback, parallel across groups, and the optimizer fuses the
+            whole <code>with_columns</code> into one pass over the data. On a real
+            universe this is the difference between seconds and minutes.
+          </p>
+        </div>
+
+        <h2>4. Lazy mode: let the optimizer earn its keep</h2>
+        <p>
+          Eager Polars runs each step immediately (great for exploration). Lazy
+          Polars (<code>pl.scan_parquet</code> / <code>.lazy()</code>) builds a
+          <em>query plan</em> and only executes on <code>.collect()</code> — after
+          optimizing it. It will read only the columns and rows you actually use,
+          even from files larger than RAM. This is how the warehouse in Module 4
+          stays fast at scale.
+        </p>
+        <div class="code-block" data-filename="m3_lazy.py">
+<textarea class="src">import polars as pl
+from quantlab.data import get_provider
+
+# Materialize a parquet file to scan lazily (Module 4 builds a real lake).
+pdf = get_provider("yahoo").get_ohlcv_multi(
+    ["SPY", "QQQ", "AAPL", "MSFT"], start="2018-01-01"
+).reset_index()
+pl.from_pandas(pdf).write_parquet("data/sample_panel.parquet")
+
+# scan_parquet does NOT read the file yet — it plans.
+lazy = (
+    pl.scan_parquet("data/sample_panel.parquet")
+      .filter(pl.col("symbol") == "AAPL")               # row pushdown
+      .with_columns(sma20=pl.col("close").rolling_mean(20))
+      .select("timestamp", "close", "sma20")            # projection pushdown
+)
+print(lazy.explain())            # see the optimized plan (filters pushed to scan)
+result = lazy.collect()          # NOW it executes, reading only what's needed
+print(result.tail(3))</textarea>
+        </div>
+        <div class="callout deepdive">
+          <div class="callout-title">🔬 Read the plan, trust the plan</div>
+          <p>
+            <code>.explain()</code> prints the optimized query plan. You'll see
+            the <code>symbol == "AAPL"</code> filter and the column selection
+            pushed <em>down into the parquet scan</em>, so Polars never reads
+            MSFT's rows or the columns you didn't ask for. Engineers who read the
+            plan catch accidental full scans before they cost an hour.
+          </p>
+        </div>
+
+        <h2>5. Rebuild our indicators in Polars (and benchmark)</h2>
+        <p>
+          The same z-score we wrote in NumPy, expressed as a Polars expression —
+          then timed against pandas on the full universe. Same math, different
+          engine; you choose the tool by the size of the job.
+        </p>
+        <div class="code-block" data-filename="code/m3_benchmark.py">
+<textarea class="src">"""Polars vs pandas on multi-symbol rolling z-score. Same answer, measure speed.
+
+Run:  python code/m3_benchmark.py
+"""
+import time
+import numpy as np
+import pandas as pd
+import polars as pl
+from quantlab.data import get_provider
+
+universe = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL",
+            "TSLA", "JPM", "XOM", "WMT"]
+panel = get_provider("yahoo").get_ohlcv_multi(universe, start="2010-01-01")
+
+# --- pandas version ---
+t0 = time.perf_counter()
+g = panel.groupby("symbol", group_keys=False)["close"]
+pd_z = g.transform(lambda s: (s - s.rolling(20).mean()) / s.rolling(20).std(ddof=0))
+t_pd = time.perf_counter() - t0
+
+# --- polars version ---
+df = pl.from_pandas(panel.reset_index()).sort(["symbol", "timestamp"])
+t0 = time.perf_counter()
+pl_df = df.with_columns(
+    z = ((pl.col("close") - pl.col("close").rolling_mean(20))
+         / pl.col("close").rolling_std(20, ddof=0)).over("symbol")
+)
+t_pl = time.perf_counter() - t0
+
+# Confirm they agree (ignoring NaN warmup), then report the speedup.
+merged = pl_df.select("symbol", "timestamp", "z").to_pandas()
+merged = merged.set_index(["symbol", merged["timestamp"]])
+print(f"pandas: {t_pd*1000:7.1f} ms")
+print(f"polars: {t_pl*1000:7.1f} ms   ({t_pd/max(t_pl,1e-6):.1f}x faster)")
+print("(Both compute the identical 20-day rolling z-score per symbol.)")</textarea>
+        </div>
+
+        <h2>6. Interop: use the right tool per step</h2>
+        <p>
+          You don't have to pick a side. Convert with
+          <code>pl.from_pandas(df)</code> and <code>pldf.to_pandas()</code> — both
+          are cheap because they share Arrow buffers where possible. A common,
+          pragmatic pattern: heavy multi-symbol munging in Polars, then hand a
+          single tidy frame to scikit-learn (which expects pandas/NumPy).
+        </p>
+        <div class="code-block" data-filename="m3_interop.py">
+<textarea class="src">import polars as pl
+from quantlab.data import get_provider
+
+pdf = get_provider("yahoo").get_ohlcv("AAPL", start="2023-01-01").reset_index()
+pl_df = pl.from_pandas(pdf)                      # pandas -> polars
+pl_df = pl_df.with_columns(ret=pl.col("close").pct_change())
+back = pl_df.to_pandas().set_index("timestamp") # polars -> pandas (for sklearn)
+print(back.tail(2)[["close", "ret"]])</textarea>
+        </div>
+
+        <div class="callout tryit">
+          <div class="callout-title">🛠️ Try it</div>
+          <p>
+            Add a <code>.over("symbol")</code> RSI to <code>m3_multisymbol.py</code>.
+            Polars has no built-in RSI, so build it from primitives: the gain/loss
+            split with <code>when/then</code>, then
+            <code>ewm_mean(alpha=1/14)</code> per symbol (Wilder smoothing), then
+            the <code>100 - 100/(1+rs)</code> formula. Compare the last value to
+            <code>quantlab.indicators.rsi</code> on the same symbol — they should
+            match. You'll have built a multi-symbol RSI that runs on all cores.
+          </p>
+        </div>
+
+        <div class="callout concept">
+          <div class="callout-title">✅ You now master</div>
+          <p>
+            The expression model, <code>when/then/otherwise</code>, per-symbol
+            <code>.over()</code> windows that compute a whole universe in one
+            parallel pass, lazy execution with query optimization and pushdown,
+            benchmarking against pandas, and seamless interop. Next we give this
+            data a permanent home and query it with SQL: <strong>DuckDB</strong>.
+          </p>
+        </div>
+
+        <div class="lesson-nav" data-lesson-nav></div>
+      </div>
+    </main>
+  </div>
+  <script src="../assets/js/manifest.js"></script>
+  <script src="../assets/js/course.js"></script>
+</body>
+</html>

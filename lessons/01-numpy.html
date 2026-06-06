@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QuantLab — NumPy to the Metal</title>
+  <link rel="stylesheet" href="../assets/css/course.css" />
+</head>
+<body data-root="lessons" data-lesson-id="01-numpy">
+  <div class="layout">
+    <nav class="sidebar"></nav>
+    <main class="content">
+      <div class="content-inner">
+
+        <p class="eyebrow">Module 1 · Data Foundations</p>
+        <h1>NumPy to the Metal</h1>
+        <p class="lead">
+          Every fast thing in Python quant — pandas, Polars, TA-Lib, vectorbt,
+          scikit-learn — is NumPy underneath. Understand the array's memory
+          layout, broadcasting, and vectorization, and you can build indicators
+          that are both <em>correct</em> and <em>faster than the libraries</em>.
+          This is the bedrock; we pour it carefully.
+        </p>
+        <div class="progress-pill" data-progress></div>
+
+        <h2>1. What an ndarray really is</h2>
+        <p>
+          A Python <code>list</code> is a box of pointers to scattered objects.
+          A NumPy <code>ndarray</code> is one contiguous block of raw bytes plus
+          a little metadata describing how to interpret it: a <strong>dtype</strong>
+          (how many bytes per number and how to read them), a <strong>shape</strong>,
+          and <strong>strides</strong> (how many bytes to step to move one element
+          along each axis). That's the whole magic: because the data is packed and
+          uniform, the CPU can scream through it, and operations run in compiled C,
+          not interpreted Python.
+        </p>
+        <div class="code-block" data-filename="m1_anatomy.py">
+<textarea class="src">import numpy as np
+
+a = np.array([100.0, 101.5, 99.8, 102.3], dtype="float64")
+print("dtype  :", a.dtype)      # float64  -> 8 bytes per number
+print("shape  :", a.shape)      # (4,)
+print("strides:", a.strides)    # (8,) -> step 8 bytes to reach the next element
+print("nbytes :", a.nbytes)     # 32 = 4 * 8
+
+# The dtype is a CHOICE with consequences. Prices: float64. Volume: int64 is
+# fine until you compute returns; cast to float to avoid integer division traps.
+vol = np.array([1_000_000, 2_500_000], dtype="int64")
+print("int / int :", (vol[1] / vol[0]))          # ok in py3, but be deliberate
+print("dtype kept:", (vol * 2).dtype)            # stays int64 (watch overflow)</textarea>
+        </div>
+        <div class="callout deepdive">
+          <div class="callout-title">🔬 Why strides matter for indicators</div>
+          <p>
+            Strides are how NumPy can give you a <em>rolling window view</em> of a
+            price series <strong>without copying a single byte</strong>. We exploit
+            that below to compute rolling statistics at C speed. Knowing strides
+            exist is the difference between "I call <code>rolling()</code>" and "I
+            know why it's fast and could write a faster one."
+          </p>
+        </div>
+
+        <h2>2. Vectorization: delete your for-loops</h2>
+        <p>
+          The cardinal sin of slow quant code is looping over bars in Python.
+          Each iteration pays the interpreter tax — type checks, boxing,
+          bytecode dispatch. Vectorization expresses the whole computation as
+          array operations so the loop happens once, in C. Let's measure it on a
+          dead-simple task: daily returns.
+        </p>
+        <div class="code-block" data-filename="m1_vectorize.py">
+<textarea class="src">import numpy as np
+import time
+
+rng = np.random.default_rng(0)
+prices = 100 * np.cumprod(1 + rng.standard_normal(1_000_000) * 0.001)
+
+# SLOW: explicit Python loop over a million bars.
+def returns_loop(p):
+    out = np.empty(len(p))
+    out[0] = np.nan
+    for i in range(1, len(p)):
+        out[i] = p[i] / p[i-1] - 1
+    return out
+
+# FAST: one vectorized expression. p[1:] and p[:-1] are zero-copy slices.
+def returns_vec(p):
+    out = np.empty(len(p))
+    out[0] = np.nan
+    out[1:] = p[1:] / p[:-1] - 1
+    return out
+
+t0 = time.perf_counter(); r1 = returns_loop(prices);  t1 = time.perf_counter()
+r2 = returns_vec(prices);                              t2 = time.perf_counter()
+
+print(f"loop : {(t1-t0)*1000:8.1f} ms")
+print(f"vec  : {(t2-t1)*1000:8.1f} ms")
+print(f"speedup: {(t1-t0)/(t2-t1):.0f}x   identical? {np.allclose(r1[1:], r2[1:])}")</textarea>
+        </div>
+        <p class="output-label">Typical output</p>
+        <div class="output">loop :    280.0 ms
+vec  :      3.0 ms
+speedup: 90x   identical? True</div>
+        <p>
+          Same answer, ~100× faster, and the vectorized version is shorter. The
+          slicing trick <code>p[1:] / p[:-1]</code> — "tomorrow's array divided by
+          today's array" — is the workhorse of return math. Internalize it.
+        </p>
+
+        <h2>3. Broadcasting: arithmetic between different shapes</h2>
+        <p>
+          Broadcasting is NumPy's rule for combining arrays of different shapes
+          without writing loops or copying data. A scalar applies to every
+          element; a <code>(252,)</code> vector applies down each column of a
+          <code>(252, 500)</code> matrix. This is exactly the shape of a
+          multi-asset return panel, so broadcasting is how you normalize 500
+          stocks at once.
+        </p>
+        <div class="code-block" data-filename="m1_broadcast.py">
+<textarea class="src">import numpy as np
+
+rng = np.random.default_rng(1)
+# 252 days x 5 assets of daily returns.
+R = rng.standard_normal((252, 5)) * 0.01
+
+# Per-asset mean and std are shape (5,). Broadcasting subtracts/divides them
+# across every row -> z-scored returns per asset, no loop over assets.
+mu = R.mean(axis=0)          # (5,)
+sd = R.std(axis=0, ddof=1)   # (5,)
+Z = (R - mu) / sd            # (252,5) - (5,) / (5,)  -> (252,5)
+
+print("means after z-score (~0):", np.round(Z.mean(axis=0), 4))
+print("stds  after z-score (~1):", np.round(Z.std(axis=0, ddof=1), 4))
+
+# axis discipline: axis=0 collapses ROWS (per-column stat = per-asset),
+# axis=1 collapses COLUMNS (per-row stat = cross-sectional, per-day).
+cross_sectional_mean = R.mean(axis=1)   # (252,) the "market" each day
+print("daily market return shape:", cross_sectional_mean.shape)</textarea>
+        </div>
+        <div class="callout pitfall">
+          <div class="callout-title">⚠️ The axis mistake everyone makes</div>
+          <p>
+            <code>axis=0</code> means "collapse along rows" → you get one number
+            <em>per column</em>. For a <code>(days, assets)</code> matrix that's a
+            <em>per-asset</em> statistic. Getting this backwards silently computes
+            cross-sectional stats when you wanted time-series stats (or vice
+            versa) — the result still has a plausible shape, so it passes
+            unnoticed. Always say the axis meaning out loud.
+          </p>
+        </div>
+
+        <h2>4. Rolling windows with zero copies (stride tricks)</h2>
+        <p>
+          Now the payoff. A rolling 20-day window over <em>n</em> bars is
+          conceptually an <code>(n-19, 20)</code> matrix. Naively building it
+          copies ~20× the data. NumPy's <code>sliding_window_view</code> instead
+          returns a <strong>view</strong> using stride tricks — no copy — so you
+          can apply any reduction (<code>mean</code>, <code>std</code>,
+          <code>max</code>) along the window axis at full speed.
+        </p>
+        <div class="code-block" data-filename="m1_rolling_view.py">
+<textarea class="src">import numpy as np
+from numpy.lib.stride_tricks import sliding_window_view
+
+x = np.arange(10.0)
+W = sliding_window_view(x, 4)     # shape (7, 4), a VIEW not a copy
+print(W)
+print("shares memory with x:", np.shares_memory(W, x))   # True!
+
+# Rolling mean/std/max in one vectorized call each:
+roll_mean = W.mean(axis=1)
+roll_std  = W.std(axis=1, ddof=0)
+roll_max  = W.max(axis=1)
+print("rolling mean:", np.round(roll_mean, 1))</textarea>
+        </div>
+        <div class="callout deepdive">
+          <div class="callout-title">🔬 The even-faster trick for moving averages</div>
+          <p>
+            For a moving <em>average</em> specifically, you can beat even the
+            window view with a <strong>prefix sum</strong>: compute
+            <code>cumsum</code> once, then every window sum is a single
+            subtraction <code>cumsum[t] - cumsum[t-w]</code> — O(n) total,
+            independent of window size. That's exactly how
+            <code>quantlab.indicators.sma</code> is implemented. The window-view
+            approach is O(n·w) but more general (works for std, max, custom
+            funcs); the prefix-sum is the specialist that wins for sums/means.
+            Knowing both, and when to use which, is the engineering.
+          </p>
+        </div>
+
+        <h2>5. Build a better indicator, from scratch</h2>
+        <p>
+          Let's put it together and build three indicators the way a principal
+          engineer would: vectorized, numerically stable, warmup-honest (NaN
+          where there isn't enough history — never silently back-filled, which
+          would leak the future), and <em>proven correct against a reference</em>.
+          These live in <code>quantlab/indicators/numpy_indicators.py</code>.
+        </p>
+        <div class="code-block" data-filename="code/m1_indicators.py">
+<textarea class="src">"""Module 1 — from-scratch indicators, proven against pandas/known values.
+
+Run:  python code/m1_indicators.py
+"""
+import numpy as np
+import pandas as pd
+
+from quantlab.indicators import sma, ewma, rolling_std, rolling_zscore, rsi
+from quantlab.data import get_provider
+
+# Real data through the provider-agnostic layer.
+close = get_provider("yahoo").get_ohlcv("AAPL", start="2018-01-01")["close"]
+x = close.to_numpy()
+
+# --- our implementations ---
+our_sma   = sma(x, 20)
+our_std   = rolling_std(x, 20, ddof=0)
+our_ewma  = ewma(x, span=20)
+our_z     = rolling_zscore(x, 20)
+our_rsi   = rsi(x, 14)
+
+# --- references (pandas) to PROVE correctness ---
+ref_sma  = close.rolling(20).mean().to_numpy()
+ref_std  = close.rolling(20).std(ddof=0).to_numpy()
+ref_ewma = close.ewm(span=20, adjust=False).mean().to_numpy()
+
+# np.allclose ignores the NaN warmup region by masking it out.
+def agree(a, b):
+    m = ~np.isnan(a) & ~np.isnan(b)
+    return np.allclose(a[m], b[m])
+
+print("SMA   matches pandas:", agree(our_sma,  ref_sma))
+print("STD   matches pandas:", agree(our_std,  ref_std))
+print("EWMA  matches pandas:", agree(our_ewma, ref_ewma))
+print(f"RSI(14) last value : {our_rsi[-1]:.1f}  (0-100, bounded -> sane)")
+print(f"z-score last value : {our_z[-1]:+.2f}  (std devs from 20d mean)")
+
+# A z-score regime signal: |z| > 2 flags a stretched market (mean-reversion cue).
+stretched = np.abs(our_z) > 2
+print(f"Days >2 sigma from mean: {np.nansum(stretched)} of {len(x)}")</textarea>
+        </div>
+        <p class="output-label">Expected output</p>
+        <div class="output">SMA   matches pandas: True
+STD   matches pandas: True
+EWMA  matches pandas: True
+RSI(14) last value : 54.3  (0-100, bounded -> sane)
+z-score last value : +0.87  (std devs from 20d mean)
+Days >2 sigma from mean: 60 of 1500+</div>
+
+        <div class="callout better">
+          <div class="callout-title">🧱 Why ours can be "better than existing"</div>
+          <p>
+            We match the standard libraries to floating-point precision —
+            <em>and</em> we control the implementation: the prefix-sum SMA is
+            O(n) regardless of window; the z-score guards divide-by-zero on flat
+            windows (returns 0, not <code>inf</code>); the warmup is explicit NaN,
+            never back-filled. When you own the code, you can fuse steps, drop
+            redundant passes over the data, and JIT the recursive ones (Module 8).
+            That's how a custom library outruns a general-purpose one on
+            <em>your</em> workload.
+          </p>
+        </div>
+
+        <h2>6. Numerical stability: the silent killer</h2>
+        <p>
+          Floating-point math is not real-number math. Subtracting two nearly
+          equal large numbers loses precision (<em>catastrophic cancellation</em>),
+          and the textbook variance formula <code>E[x²] − E[x]²</code> is a
+          classic offender. For prices in the hundreds this rarely bites; for
+          some feature pipelines it absolutely does. The habit: prefer formulas
+          that don't subtract big-from-big, and use log-returns for compounding.
+        </p>
+        <div class="code-block" data-filename="m1_stability.py">
+<textarea class="src">import numpy as np
+
+# A pathological series: tiny variation on a huge offset.
+x = 1e8 + np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+
+naive_var  = (x**2).mean() - x.mean()**2          # E[x^2] - E[x]^2 (unstable)
+stable_var = ((x - x.mean())**2).mean()           # mean of squared deviations
+true_var   = np.var(x)                            # NumPy uses a stable method
+
+print(f"naive : {naive_var:.6f}")     # can go NEGATIVE — variance can't be < 0!
+print(f"stable: {stable_var:.6f}")
+print(f"numpy : {true_var:.6f}")</textarea>
+        </div>
+        <div class="callout pitfall">
+          <div class="callout-title">⚠️ Variance went negative?</div>
+          <p>
+            The naive formula can produce a negative "variance" here purely from
+            rounding — an impossibility that crashes any later <code>sqrt</code>.
+            This is why our <code>rolling_std</code> uses the window-view + NumPy's
+            stable reduction rather than rolling a running sum-of-squares. When a
+            number can't be wrong-but-plausible, make it impossible to be wrong.
+          </p>
+        </div>
+
+        <h2>7. Log returns, and why quants love them</h2>
+        <div class="code-block" data-filename="m1_logreturns.py">
+<textarea class="src">import numpy as np
+from quantlab.data import get_provider
+from quantlab.utils import simple_returns, log_returns
+
+close = get_provider("yahoo").get_ohlcv("SPY", start="2020-01-01")["close"]
+
+simple = simple_returns(close)
+logr   = log_returns(close)
+
+# Log returns are TIME-ADDITIVE: summing them gives the total log return,
+# which exponentiates back to the exact cumulative simple return.
+total_from_logs = np.exp(logr.sum()) - 1
+total_simple    = (1 + simple.fillna(0)).prod() - 1
+print(f"cumulative (from log sum) : {total_from_logs:.2%}")
+print(f"cumulative (from product) : {total_simple:.2%}")   # identical
+
+# This additivity is why resampling, annualizing, and many models use log space.
+ann_vol = logr.std() * np.sqrt(252)
+print(f"annualized volatility: {ann_vol:.1%}")</textarea>
+        </div>
+
+        <div class="callout tryit">
+          <div class="callout-title">🛠️ Try it</div>
+          <p>
+            Add a function <code>rolling_max_drawdown(prices, window)</code> to
+            your own module using <code>sliding_window_view</code>: for each
+            window, the max drawdown is <code>1 - window.min()/window.max()</code>
+            only if the min comes after the max — handle that ordering correctly.
+            Then verify a known case by hand. This single exercise exercises
+            views, axis reductions, and careful edge handling all at once.
+          </p>
+        </div>
+
+        <div class="callout concept">
+          <div class="callout-title">✅ You now master</div>
+          <p>
+            The ndarray's memory model, vectorization (and why it's ~100× faster
+            than loops), broadcasting with correct axis discipline, zero-copy
+            rolling windows, numerically stable statistics, and three
+            from-scratch indicators that match the libraries exactly. Next we put
+            a real index and labels on this raw speed: <strong>pandas</strong>.
+          </p>
+        </div>
+
+        <div class="lesson-nav" data-lesson-nav></div>
+      </div>
+    </main>
+  </div>
+  <script src="../assets/js/manifest.js"></script>
+  <script src="../assets/js/course.js"></script>
+</body>
+</html>

@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QuantLab — XGBoost & LightGBM Alpha</title>
+  <link rel="stylesheet" href="../assets/css/course.css" />
+</head>
+<body data-root="lessons" data-lesson-id="12-boosting">
+  <div class="layout">
+    <nav class="sidebar"></nav>
+    <main class="content">
+      <div class="content-inner">
+
+        <p class="eyebrow">Module 12 · Machine Learning</p>
+        <h1>XGBoost & LightGBM Alpha</h1>
+        <p class="lead">Gradient-boosted trees are the workhorse of tabular alpha. We train, validate, and interpret them — and feed their predictions back into the backtest engine.</p>
+        <div class="progress-pill" data-progress></div>
+
+        <div class="callout tryit">
+          <div class="callout-title">🚧 Full lesson in progress</div>
+          <p>
+            The course is being written module-by-module for maximum depth. This
+            lesson's detailed outline is below so you can see exactly what it will
+            cover — and the underlying <code>quantlab</code> package code it builds
+            on already exists and is tested. Modules 0–4 are complete and runnable;
+            work through those first.
+          </p>
+        </div>
+
+        <h2>What this lesson will cover</h2>
+                <h3>Why boosted trees for tabular features</h3>
+        <p>Nonlinear interactions, robustness to feature scale, and strong baselines vs deep nets on tabular market data.</p>
+        <h3>XGBoost vs LightGBM</h3>
+        <p>API differences, speed, categorical handling, and when to pick which.</p>
+        <h3>Validation done right</h3>
+        <p>Early stopping on a time-ordered validation set, not a random one; avoiding the leak.</p>
+        <h3>Feature importance & SHAP</h3>
+        <p>Gain/cover vs SHAP values for honest, per-prediction attribution — and spotting features that are leaks in disguise.</p>
+        <h3>Predictions to positions</h3>
+        <p>Turning predicted probabilities/returns into sized, leak-free signals for quantlab.backtest.</p>
+
+        <div class="callout better">
+          <div class="callout-title">🧱 Already in the repo</div>
+          <p>
+            The reusable building blocks for this module live in the
+            <code>quantlab/</code> package (data layer, indicators, backtest +
+            stats engine, strategy combiner) and are exercised by the
+            <code>tests/</code> suite. The lesson narration will show you how they
+            were built and how to extend them.
+          </p>
+        </div>
+
+        <div class="lesson-nav" data-lesson-nav></div>
+      </div>
+    </main>
+  </div>
+  <script src="../assets/js/manifest.js"></script>
+  <script src="../assets/js/course.js"></script>
+</body>
+</html>

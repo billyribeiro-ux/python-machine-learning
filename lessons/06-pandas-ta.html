@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QuantLab — pandas-ta & Custom Studies</title>
+  <link rel="stylesheet" href="../assets/css/course.css" />
+</head>
+<body data-root="lessons" data-lesson-id="06-pandas-ta">
+  <div class="layout">
+    <nav class="sidebar"></nav>
+    <main class="content">
+      <div class="content-inner">
+
+        <p class="eyebrow">Module 6 · Indicators</p>
+        <h1>pandas-ta & Custom Studies</h1>
+        <p class="lead">pandas-ta adds 130+ indicators directly onto DataFrames and lets you compose whole 'studies'. We use it for breadth and learn where it complements (and where it diverges from) TA-Lib.</p>
+        <div class="progress-pill" data-progress></div>
+
+        <div class="callout tryit">
+          <div class="callout-title">🚧 Full lesson in progress</div>
+          <p>
+            The course is being written module-by-module for maximum depth. This
+            lesson's detailed outline is below so you can see exactly what it will
+            cover — and the underlying <code>quantlab</code> package code it builds
+            on already exists and is tested. Modules 0–4 are complete and runnable;
+            work through those first.
+          </p>
+        </div>
+
+        <h2>What this lesson will cover</h2>
+                <h3>The DataFrame extension API</h3>
+        <p>df.ta.rsi(), df.ta.macd(), and the .ta.strategy() runner that computes a named bundle of indicators in one call.</p>
+        <h3>Building a custom Strategy object</h3>
+        <p>Declaring a reusable set of indicators with custom settings as a ta.Strategy, then applying it across a universe.</p>
+        <h3>Multiprocessing & performance notes</h3>
+        <p>When pandas-ta's convenience costs you speed, and how to fall back to our Polars/NumPy implementations for hot paths.</p>
+        <h3>TA-Lib vs pandas-ta divergences</h3>
+        <p>Subtle definitional differences (e.g. RSI smoothing, MACD defaults) and how to pick a single source of truth so backtests are reproducible.</p>
+        <h3>Composing into the QuantLab pipeline</h3>
+        <p>Normalizing pandas-ta output back into our schema and feeding it to the backtest engine.</p>
+
+        <div class="callout better">
+          <div class="callout-title">🧱 Already in the repo</div>
+          <p>
+            The reusable building blocks for this module live in the
+            <code>quantlab/</code> package (data layer, indicators, backtest +
+            stats engine, strategy combiner) and are exercised by the
+            <code>tests/</code> suite. The lesson narration will show you how they
+            were built and how to extend them.
+          </p>
+        </div>
+
+        <div class="lesson-nav" data-lesson-nav></div>
+      </div>
+    </main>
+  </div>
+  <script src="../assets/js/manifest.js"></script>
+  <script src="../assets/js/course.js"></script>
+</body>
+</html>

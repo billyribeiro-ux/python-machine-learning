@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QuantLab — Multi-Symbol Scanners</title>
+  <link rel="stylesheet" href="../assets/css/course.css" />
+</head>
+<body data-root="lessons" data-lesson-id="14-scanners">
+  <div class="layout">
+    <nav class="sidebar"></nav>
+    <main class="content">
+      <div class="content-inner">
+
+        <p class="eyebrow">Module 14 · Putting It Together</p>
+        <h1>Multi-Symbol Scanners</h1>
+        <p class="lead">Combine the data lake, Polars, and the indicator library into fast scanners that rank a universe for day-trading and swing setups.</p>
+        <div class="progress-pill" data-progress></div>
+
+        <div class="callout tryit">
+          <div class="callout-title">🚧 Full lesson in progress</div>
+          <p>
+            The course is being written module-by-module for maximum depth. This
+            lesson's detailed outline is below so you can see exactly what it will
+            cover — and the underlying <code>quantlab</code> package code it builds
+            on already exists and is tested. Modules 0–4 are complete and runnable;
+            work through those first.
+          </p>
+        </div>
+
+        <h2>What this lesson will cover</h2>
+                <h3>Scanner architecture</h3>
+        <p>DuckDB lake -> Polars .over('symbol') indicators -> ranking/filtering -> alerts. Build on code/m4_windows_sql.py.</p>
+        <h3>Swing-trade scans</h3>
+        <p>Pullbacks-in-uptrend, breakouts, relative strength vs SPY (extending the Module 4 RS join).</p>
+        <h3>Intraday/day-trade scans</h3>
+        <p>Gap-ups, opening-range breakouts, VWAP reclaims on 1m/5m bars; the data-provider intraday limits and how to handle them.</p>
+        <h3>Ranking & cross-sectional normalization</h3>
+        <p>Z-scoring features across the universe so 'top 20' means something comparable.</p>
+        <h3>Alerting & scheduling</h3>
+        <p>Turning a scan into a repeatable job that writes results and notifies you.</p>
+
+        <div class="callout better">
+          <div class="callout-title">🧱 Already in the repo</div>
+          <p>
+            The reusable building blocks for this module live in the
+            <code>quantlab/</code> package (data layer, indicators, backtest +
+            stats engine, strategy combiner) and are exercised by the
+            <code>tests/</code> suite. The lesson narration will show you how they
+            were built and how to extend them.
+          </p>
+        </div>
+
+        <div class="lesson-nav" data-lesson-nav></div>
+      </div>
+    </main>
+  </div>
+  <script src="../assets/js/manifest.js"></script>
+  <script src="../assets/js/course.js"></script>
+</body>
+</html>

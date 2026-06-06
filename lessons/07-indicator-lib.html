@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QuantLab — Build a Better Indicator Library</title>
+  <link rel="stylesheet" href="../assets/css/course.css" />
+</head>
+<body data-root="lessons" data-lesson-id="07-indicator-lib">
+  <div class="layout">
+    <nav class="sidebar"></nav>
+    <main class="content">
+      <div class="content-inner">
+
+        <p class="eyebrow">Module 7 · Indicators</p>
+        <h1>Build a Better Indicator Library</h1>
+        <p class="lead">The payoff module: a unified Indicator base class + registry + custom-settings system that works across pandas, Polars, and Numba — so any indicator composes, sweeps, and tests uniformly.</p>
+        <div class="progress-pill" data-progress></div>
+
+        <div class="callout tryit">
+          <div class="callout-title">🚧 Full lesson in progress</div>
+          <p>
+            The course is being written module-by-module for maximum depth. This
+            lesson's detailed outline is below so you can see exactly what it will
+            cover — and the underlying <code>quantlab</code> package code it builds
+            on already exists and is tested. Modules 0–4 are complete and runnable;
+            work through those first.
+          </p>
+        </div>
+
+        <h2>What this lesson will cover</h2>
+                <h3>The Indicator interface</h3>
+        <p>A small ABC: params (a dataclass), compute(ohlcv) -> Series/Frame, and a name/registry key. The same pattern as quantlab.strategies.ComboParams, generalized.</p>
+        <h3>A registry & factory</h3>
+        <p>Register indicators by name so a config file (or Optuna) can request 'rsi' with {'window': 14} generically — the foundation for parameter sweeps.</p>
+        <h3>Multi-backend dispatch</h3>
+        <p>One indicator, three engines: NumPy for single series, Polars .over('symbol') for universes, Numba for path-dependent ones — chosen automatically by input type/size.</p>
+        <h3>Settings, validation, and warmup contracts</h3>
+        <p>Every indicator declares its minimum history and validates params, so misconfiguration fails loudly, not silently.</p>
+        <h3>Combining indicators generically</h3>
+        <p>A combine() that takes a list of (indicator, settings) and produces a feature frame — the engine behind the capstone 'combine multiple indicators with custom settings'.</p>
+
+        <div class="callout better">
+          <div class="callout-title">🧱 Already in the repo</div>
+          <p>
+            The reusable building blocks for this module live in the
+            <code>quantlab/</code> package (data layer, indicators, backtest +
+            stats engine, strategy combiner) and are exercised by the
+            <code>tests/</code> suite. The lesson narration will show you how they
+            were built and how to extend them.
+          </p>
+        </div>
+
+        <div class="lesson-nav" data-lesson-nav></div>
+      </div>
+    </main>
+  </div>
+  <script src="../assets/js/manifest.js"></script>
+  <script src="../assets/js/course.js"></script>
+</body>
+</html>

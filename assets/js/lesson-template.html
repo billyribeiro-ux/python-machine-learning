@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<!--
+  ========================================================================
+  QuantLab LESSON TEMPLATE (reference only — copy this to make a new lesson)
+  ========================================================================
+  Rules that keep every lesson consistent:
+   - <body> needs data-root="lessons" and data-lesson-id="<id matching manifest>"
+   - Add the lesson to assets/js/manifest.js so the sidebar + Prev/Next include it
+   - Code blocks: <div class="code-block" data-filename="x.py">
+                    <textarea class="src">...python...</textarea>
+                  </div>
+     (use <textarea> so < and > in code need no escaping; course.js turns it
+      into a Monaco editor with Copy + Download, with a <pre> fallback offline)
+   - Callout classes: concept | deepdive | pitfall | better | tryit
+   - Keep the data-lesson-nav and data-progress placeholders at the bottom.
+  ========================================================================
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QuantLab — Lesson Title</title>
+  <link rel="stylesheet" href="../assets/css/course.css" />
+</head>
+<body data-root="lessons" data-lesson-id="LESSON-ID">
+  <div class="layout">
+    <nav class="sidebar"></nav>
+    <main class="content">
+      <div class="content-inner">
+
+        <p class="eyebrow">Module N</p>
+        <h1>Lesson Title</h1>
+        <p class="lead">One-paragraph promise of what the reader will master.</p>
+        <div class="progress-pill" data-progress></div>
+
+        <!-- ... lesson body ... -->
+
+        <div class="lesson-nav" data-lesson-nav></div>
+      </div>
+    </main>
+  </div>
+  <script src="../assets/js/manifest.js"></script>
+  <script src="../assets/js/course.js"></script>
+</body>
+</html>

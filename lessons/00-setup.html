@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QuantLab — Setup &amp; the Principal-Engineer Mindset</title>
+  <link rel="stylesheet" href="../assets/css/course.css" />
+</head>
+<body data-root="lessons" data-lesson-id="00-setup">
+  <div class="layout">
+    <nav class="sidebar"></nav>
+    <main class="content">
+      <div class="content-inner">
+
+        <p class="eyebrow">Module 0 · Getting Started</p>
+        <h1>Setup &amp; the Principal-Engineer Mindset</h1>
+        <p class="lead">
+          Before a single indicator, we install everything correctly (including
+          the famously fiddly TA-Lib), lay out a project the way a senior quant
+          team would, and internalize the five habits that separate code that
+          "runs" from code you'd actually trade real money on.
+        </p>
+        <div class="progress-pill" data-progress></div>
+
+        <h2>1. Why this course is different</h2>
+        <p>
+          Most tutorials teach you to <em>call functions</em>:
+          <code>talib.RSI(close, 14)</code>, done. That's enough to make a chart
+          and dangerous enough to lose money. A principal engineer asks a
+          different set of questions about that same line:
+        </p>
+        <ul>
+          <li><strong>Is it correct?</strong> Does this RSI match Wilder's
+            definition, or a subtly different one? How would I <em>prove</em> it?</li>
+          <li><strong>Is it fast?</strong> Will it still run in milliseconds when
+            I scan 5,000 symbols across 10 years of minute bars?</li>
+          <li><strong>Does it leak the future?</strong> Does the value at bar
+            <em>t</em> secretly depend on data from bar <em>t+1</em>? (This single
+            bug invalidates more backtests than all others combined.)</li>
+          <li><strong>Can I reproduce it?</strong> Same inputs, same outputs,
+            forever — or does it depend on a library version, a random seed, or
+            today's Yahoo data?</li>
+          <li><strong>Can someone else trust it?</strong> Is there a test that
+            fails loudly the day the behavior changes?</li>
+        </ul>
+        <p>
+          We will answer all five for everything we build. That is what "L7+"
+          means here: not arcane syntax, but <em>engineering judgement</em>
+          applied relentlessly to markets.
+        </p>
+
+        <div class="callout concept">
+          <div class="callout-title">🎯 The five habits (our north star)</div>
+          <p><strong>Vectorize</strong> — push loops into NumPy/Polars/C.
+             <strong>Stabilize</strong> — choose numerically sound formulas.
+             <strong>Don't peek</strong> — never let bar <em>t</em> see the future.
+             <strong>Reproduce</strong> — pin versions, seed randomness, cache data.
+             <strong>Test</strong> — every indicator and backtest has an assertion
+             that guards it.</p>
+        </div>
+
+        <h2>2. Installing Python and the toolkit</h2>
+        <p>
+          Use a dedicated environment so the course's pinned versions never
+          collide with your other projects. We recommend
+          <strong>conda/mamba</strong> for one reason that will save you an hour
+          of pain: it can install the <strong>TA-Lib C library</strong> for you.
+          (TA-Lib's Python package is a thin wrapper over a C library that must
+          be compiled or installed separately — the #1 setup hurdle in all of
+          Python quant.)
+        </p>
+
+        <h3>Option A — conda / mamba (recommended, handles TA-Lib)</h3>
+        <div class="code-block" data-filename="setup_conda.sh" data-lang="shell">
+<textarea class="src"># Create an isolated environment with Python 3.11
+conda create -n quantlab python=3.11 -y
+conda activate quantlab
+
+# The ONE line that makes TA-Lib painless: install the C library from conda-forge
+conda install -c conda-forge ta-lib -y
+
+# Everything else via pip (works great inside the conda env)
+pip install -r requirements.txt</textarea>
+        </div>
+
+        <h3>Option B — pip / venv (you must install the TA-Lib C lib yourself)</h3>
+        <div class="code-block" data-filename="setup_pip.sh" data-lang="shell">
+<textarea class="src">python3.11 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+
+# Install the TA-Lib C LIBRARY first (the Python wheel needs it):
+#   macOS:         brew install ta-lib
+#   Ubuntu/Debian: sudo apt-get install -y ta-lib   (or build from source)
+#   Windows:       use a prebuilt wheel from the unofficial binaries, or conda
+# THEN the Python packages:
+pip install -r requirements.txt</textarea>
+        </div>
+
+        <div class="callout pitfall">
+          <div class="callout-title">⚠️ The TA-Lib trap</div>
+          <p>
+            <code>pip install TA-Lib</code> fails with a compiler error if the
+            underlying C library isn't present. The error mentions
+            <code>ta_libc.h</code> not found. The fix is never "try pip again" —
+            it's "install the C library first" (conda-forge is the least painful
+            path on every OS). If you only need pure-Python indicators, you can
+            skip TA-Lib entirely; our tests <code>importorskip</code> it.
+          </p>
+        </div>
+
+        <h3>The pinned requirements</h3>
+        <p>
+          Here is the <code>requirements.txt</code> the course ships with.
+          Pinning major versions is a reproducibility habit: "works on my
+          machine" becomes "works on every machine."
+        </p>
+        <div class="code-block" data-filename="requirements.txt" data-lang="plaintext">
+<textarea class="src"># --- core data stack ---
+numpy>=1.26,<3.0
+pandas>=2.1,<3.0
+polars>=0.20
+pyarrow>=14.0          # parquet engine shared by pandas/polars/duckdb
+duckdb>=0.10
+
+# --- market data (free, no API key) ---
+yfinance>=0.2.40
+
+# --- indicators ---
+TA-Lib>=0.4.28         # requires the C library (see setup notes)
+pandas-ta>=0.3.14b0
+
+# --- backtesting & performance ---
+vectorbt>=0.26
+numba>=0.59
+quantstats>=0.0.62
+
+# --- machine learning ---
+scikit-learn>=1.4
+xgboost>=2.0
+lightgbm>=4.3
+optuna>=3.6
+
+# --- app & dashboard ---
+streamlit>=1.33
+plotly>=5.20
+
+# --- testing & quality ---
+pytest>=8.0
+hypothesis>=6.100      # property-based tests (Module 17)</textarea>
+        </div>
+
+        <h2>3. Project layout</h2>
+        <p>
+          A flat pile of notebooks does not scale. We use a small, conventional
+          layout that separates the <em>reusable library</em> (<code>quantlab/</code>)
+          from <em>throwaway exploration</em> and from <em>tests</em>. This is the
+          same shape you'd find in a real quant shop, just smaller.
+        </p>
+        <div class="code-block" data-filename="layout.txt" data-lang="plaintext">
+<textarea class="src">python-machine-learning/
+├── quantlab/              # the reusable package we build across the course
+│   ├── data/              # provider-agnostic data layer (yahoo, cache, ...)
+│   ├── indicators/        # from-scratch indicators (numpy, polars, numba)
+│   └── utils/             # returns, stats helpers
+├── lessons/               # this interactive course (HTML)
+├── code/                  # runnable scripts mirroring each lesson's key example
+├── tests/                 # pytest suite: correctness + strategy stats
+├── data/                  # local cache + parquet "data lake" (gitignored)
+└── requirements.txt</textarea>
+        </div>
+
+        <div class="callout deepdive">
+          <div class="callout-title">🔬 Why a package, not just notebooks?</div>
+          <p>
+            Code you <code>import</code> is code you can test, version, reuse, and
+            reason about. Notebooks are perfect for <em>exploring</em> and for
+            this kind of narrated teaching, but the moment a function is good
+            enough to depend on, it belongs in <code>quantlab/</code> with a test.
+            By the end of the course, <code>quantlab/</code> is your personal
+            quant platform; the notebooks are just how you got there.
+          </p>
+        </div>
+
+        <h2>4. The data layer: provider-agnostic from line one</h2>
+        <p>
+          Here's the most important architectural idea in the whole course, and
+          we adopt it on day one: <strong>no lesson imports a data vendor SDK
+          directly.</strong> Everything goes through a <code>DataProvider</code>
+          interface. Today it's Yahoo Finance (free, no key); the day you switch
+          to Alpaca or Polygon, you change one string and every line you ever
+          wrote keeps working.
+        </p>
+        <p>Let's prove the toolchain works by pulling and sanity-checking data:</p>
+
+        <div class="code-block" data-filename="code/m0_hello_data.py">
+<textarea class="src">"""Module 0 — verify your install and meet the data layer.
+
+Run:  python code/m0_hello_data.py
+"""
+from quantlab.data import get_provider
+
+# Ask for a provider BY NAME. Swapping vendors later = change this one string.
+provider = get_provider("yahoo")           # later: get_provider("alpaca"), etc.
+
+# Daily bars for an ETF (SPY) and a stock (AAPL). The frame you get back is
+# ALWAYS the same normalized shape, no matter the vendor:
+#   - tz-aware UTC DatetimeIndex named "timestamp"
+#   - float columns: open, high, low, close, volume
+#   - split/dividend-ADJUSTED close by default
+spy = provider.get_ohlcv("SPY", start="2020-01-01", timeframe="1d")
+aapl = provider.get_ohlcv("AAPL", start="2020-01-01", timeframe="1d")
+
+print("SPY rows:", len(spy), "| range:", spy.index.min().date(), "->", spy.index.max().date())
+print(spy.tail(3))
+
+# A first, honest sanity check: daily returns should be small and centered ~0.
+ret = spy["close"].pct_change()
+print(f"\nSPY daily return  mean={ret.mean():.4%}  std={ret.std():.4%}")
+print(f"Worst day: {ret.min():.2%}  Best day: {ret.max():.2%}")
+
+# Multi-symbol pull returns a tidy (long) frame — the shape Polars/DuckDB/ML want.
+panel = provider.get_ohlcv_multi(["SPY", "QQQ", "AAPL"], start="2023-01-01")
+print("\nTidy panel shape:", panel.shape)
+print(panel.groupby("symbol")["close"].last())</textarea>
+        </div>
+
+        <p class="output-label">Expected output (numbers vary with the date)</p>
+        <div class="output">SPY rows: 1100+ | range: 2020-01-02 -> 2024-...
+                               open        high   ...      close      volume
+timestamp                                         ...
+2024-...                  ...         ...    ...      ...        ...
+
+SPY daily return  mean=0.05%  std=1.21%
+Worst day: -10.94%  Best day: 9.06%
+
+Tidy panel shape: (1500+, 6)
+symbol
+AAPL    ...
+QQQ     ...
+SPY     ...</div>
+
+        <div class="callout better">
+          <div class="callout-title">🧱 What we already built better</div>
+          <p>
+            Notice you never saw the words <code>yfinance</code>,
+            <code>Adj Close</code>, or a tz-naive index. Our
+            <code>get_provider(...).get_ohlcv(...)</code> normalizes all of that
+            away and <em>validates</em> the result (high ≥ open/close/low, volume
+            ≥ 0, sorted unique timestamps). Off-the-shelf vendor SDKs hand you
+            their raw quirks; we hand you a guaranteed contract. Read the code:
+            <code>quantlab/data/base.py</code> and <code>quantlab/data/yahoo.py</code>.
+          </p>
+        </div>
+
+        <h2>5. The one bug that ruins backtests: look-ahead bias</h2>
+        <p>
+          We introduce this now because it will haunt every later module. A bar
+          for 2024-01-02 is only <em>complete</em> after the session ends. If
+          your strategy uses bar <em>t</em>'s close to make a decision and then
+          assumes it traded at bar <em>t</em>'s open, it has peeked at the
+          future. The fix is a discipline we'll repeat constantly: a signal
+          computed from data up to <em>t</em> can only act at <em>t+1</em>.
+        </p>
+        <div class="code-block" data-filename="code/m0_lookahead.py">
+<textarea class="src">"""The single most expensive bug in quant, shown in 12 lines."""
+import numpy as np
+from quantlab.data import get_provider
+
+px = get_provider("yahoo").get_ohlcv("SPY", start="2015-01-01")
+close = px["close"]
+sma50 = close.rolling(50).mean()
+
+# A naive "buy when price > 50-day average" signal.
+signal = (close > sma50).astype(int)
+
+# WRONG: act on today's signal using today's return (you couldn't have known
+# the signal until the close, yet you're crediting yourself today's move).
+wrong = signal * close.pct_change()
+
+# RIGHT: you learn the signal at today's close, so you can only earn the NEXT
+# day's return. shift(1) enforces that one-bar delay.
+right = signal.shift(1) * close.pct_change()
+
+print(f"Look-ahead 'edge' (FAKE): {(1+wrong.fillna(0)).prod()-1:.1%}")
+print(f"Honest result:            {(1+right.fillna(0)).prod()-1:.1%}")
+print("The gap between them is pure self-deception.")</textarea>
+        </div>
+        <div class="callout pitfall">
+          <div class="callout-title">⚠️ Remember the rule</div>
+          <p>
+            <strong>Decide on bar <em>t</em>, act on bar <em>t+1</em>.</strong>
+            In pandas that's <code>signal.shift(1)</code>. We packaged the safe
+            version as <code>quantlab.utils.forward_returns()</code> for ML labels.
+            Every backtest in this course honors this rule, and Module 10 builds
+            a harness that makes it the default.
+          </p>
+        </div>
+
+        <h2>6. Reproducibility: seed it, pin it, cache it</h2>
+        <p>
+          Two runs of the same code should give the same answer. That means: seed
+          every random number generator, pin library versions (done above), and
+          cache market data so a re-run isn't at the mercy of Yahoo's mood. Our
+          <code>YahooProvider</code> already caches to parquet — the second call
+          is instant and offline.
+        </p>
+        <div class="code-block" data-filename="m0_reproducible.py">
+<textarea class="src">import numpy as np
+
+# A single seeded generator, passed around explicitly, beats the global
+# np.random state (which any imported library can silently disturb).
+rng = np.random.default_rng(42)
+print(rng.standard_normal(3))   # same three numbers every run, forever</textarea>
+        </div>
+
+        <h2>7. How to use this course</h2>
+        <ul>
+          <li>Read the narration top-to-bottom; it builds an argument, not just a
+            reference.</li>
+          <li>Use the <strong>Copy</strong> / <strong>Download .py</strong>
+            buttons on any code pane and run it in your <code>quantlab</code>
+            environment. Scripts prefixed <code>code/</code> live in the repo and
+            run as-is.</li>
+          <li>Do the <em>Try it</em> boxes — they're where understanding turns
+            into skill.</li>
+          <li>Move with <strong>Previous / Next</strong> below, and mark lessons
+            complete to track progress.</li>
+        </ul>
+
+        <div class="callout tryit">
+          <div class="callout-title">🛠️ Try it</div>
+          <p>
+            Run <code>code/m0_hello_data.py</code>, then change <code>"SPY"</code>
+            to a stock you follow and <code>timeframe="1d"</code> to
+            <code>"1h"</code> (intraday — note Yahoo only serves the last ~60
+            days of hourly data). Confirm the returned frame still has the exact
+            same columns and a UTC index. That invariance is the whole point of
+            the data layer.
+          </p>
+        </div>
+
+        <div class="callout concept">
+          <div class="callout-title">✅ You now have</div>
+          <p>
+            A reproducible environment, a clean project layout, a
+            provider-agnostic data layer that returns validated OHLCV, and the
+            two ideas that protect every result you'll produce: <em>no
+            look-ahead</em> and <em>reproducibility</em>. Next we go to the metal
+            with NumPy and build indicators that beat the libraries.
+          </p>
+        </div>
+
+        <div class="lesson-nav" data-lesson-nav></div>
+      </div>
+    </main>
+  </div>
+  <script src="../assets/js/manifest.js"></script>
+  <script src="../assets/js/course.js"></script>
+</body>
+</html>

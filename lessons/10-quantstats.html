@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QuantLab — Backtesting & QuantStats Tearsheets</title>
+  <link rel="stylesheet" href="../assets/css/course.css" />
+</head>
+<body data-root="lessons" data-lesson-id="10-quantstats">
+  <div class="layout">
+    <nav class="sidebar"></nav>
+    <main class="content">
+      <div class="content-inner">
+
+        <p class="eyebrow">Module 10 · Backtesting</p>
+        <h1>Backtesting & QuantStats Tearsheets</h1>
+        <p class="lead">Turn a returns series into a professional tearsheet, and learn the metrics that matter — plus walk-forward testing and the overfitting traps that invalidate most strategies.</p>
+        <div class="progress-pill" data-progress></div>
+
+        <div class="callout tryit">
+          <div class="callout-title">🚧 Full lesson in progress</div>
+          <p>
+            The course is being written module-by-module for maximum depth. This
+            lesson's detailed outline is below so you can see exactly what it will
+            cover — and the underlying <code>quantlab</code> package code it builds
+            on already exists and is tested. Modules 0–4 are complete and runnable;
+            work through those first.
+          </p>
+        </div>
+
+        <h2>What this lesson will cover</h2>
+                <h3>The full metric set</h3>
+        <p>Sharpe, Sortino, Calmar, max drawdown, exposure, tail ratio, VaR — building on quantlab.backtest.stats which already computes the core ones.</p>
+        <h3>QuantStats tearsheets</h3>
+        <p>qs.reports.html()/full() against a benchmark (SPY), and how to feed it our backtest output.</p>
+        <h3>Walk-forward & out-of-sample</h3>
+        <p>Train on a window, test on the next, roll forward — the only honest way to estimate live performance.</p>
+        <h3>Overfitting & the multiple-testing problem</h3>
+        <p>Why the best of 10,000 swept combos is probably luck; deflated Sharpe and the reality check.</p>
+        <h3>Transaction costs & capacity</h3>
+        <p>How fees, slippage, and market impact turn a paper edge into a real (or negative) one.</p>
+
+        <div class="callout better">
+          <div class="callout-title">🧱 Already in the repo</div>
+          <p>
+            The reusable building blocks for this module live in the
+            <code>quantlab/</code> package (data layer, indicators, backtest +
+            stats engine, strategy combiner) and are exercised by the
+            <code>tests/</code> suite. The lesson narration will show you how they
+            were built and how to extend them.
+          </p>
+        </div>
+
+        <div class="lesson-nav" data-lesson-nav></div>
+      </div>
+    </main>
+  </div>
+  <script src="../assets/js/manifest.js"></script>
+  <script src="../assets/js/course.js"></script>
+</body>
+</html>

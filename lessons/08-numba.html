@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QuantLab — Numba: Path-Dependent Speed</title>
+  <link rel="stylesheet" href="../assets/css/course.css" />
+</head>
+<body data-root="lessons" data-lesson-id="08-numba">
+  <div class="layout">
+    <nav class="sidebar"></nav>
+    <main class="content">
+      <div class="content-inner">
+
+        <p class="eyebrow">Module 8 · Indicators</p>
+        <h1>Numba: Path-Dependent Speed</h1>
+        <p class="lead">Some indicators are inherently sequential — Supertrend, trailing stops, parabolic SAR — where each bar depends on the last. Numba JIT-compiles these Python loops to C speed, beating even clever vectorization.</p>
+        <div class="progress-pill" data-progress></div>
+
+        <div class="callout tryit">
+          <div class="callout-title">🚧 Full lesson in progress</div>
+          <p>
+            The course is being written module-by-module for maximum depth. This
+            lesson's detailed outline is below so you can see exactly what it will
+            cover — and the underlying <code>quantlab</code> package code it builds
+            on already exists and is tested. Modules 0–4 are complete and runnable;
+            work through those first.
+          </p>
+        </div>
+
+        <h2>What this lesson will cover</h2>
+                <h3>When vectorization loses</h3>
+        <p>Path-dependent recurrences can't be expressed as a single array op without O(n^2) tricks. The honest answer is a loop — just a fast one.</p>
+        <h3>@njit, nopython, and the type system</h3>
+        <p>Writing Numba-friendly code: typed arrays in/out, no Python objects, why the first call is slow (compilation) and the rest are C-fast.</p>
+        <h3>Building Supertrend & a trailing-stop ATR</h3>
+        <p>A real path-dependent indicator from scratch, JIT-compiled, validated against a slow reference.</p>
+        <h3>parallel=True and guvectorize</h3>
+        <p>Parallelizing across symbols with prange, and writing generalized ufuncs that broadcast like NumPy.</p>
+        <h3>Plugging Numba indicators into the registry</h3>
+        <p>Numba-backed compute() behind the Module 7 interface, so callers never know it's compiled.</p>
+
+        <div class="callout better">
+          <div class="callout-title">🧱 Already in the repo</div>
+          <p>
+            The reusable building blocks for this module live in the
+            <code>quantlab/</code> package (data layer, indicators, backtest +
+            stats engine, strategy combiner) and are exercised by the
+            <code>tests/</code> suite. The lesson narration will show you how they
+            were built and how to extend them.
+          </p>
+        </div>
+
+        <div class="lesson-nav" data-lesson-nav></div>
+      </div>
+    </main>
+  </div>
+  <script src="../assets/js/manifest.js"></script>
+  <script src="../assets/js/course.js"></script>
+</body>
+</html>

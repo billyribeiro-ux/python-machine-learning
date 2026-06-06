@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QuantLab — Master Quantitative Trading in Python</title>
+  <link rel="stylesheet" href="assets/css/course.css" />
+</head>
+<body data-root="root" data-lesson-id="home">
+  <div class="layout">
+    <nav class="sidebar"><!-- built by course.js --></nav>
+    <main class="content">
+      <div class="content-inner">
+
+        <div class="hero">
+          <p class="eyebrow">An in-depth, narrated course</p>
+          <h1>QuantLab: Master Quantitative Trading in Python</h1>
+          <p class="lead">
+            From the memory layout of a NumPy array to a tuned, walk-forward
+            machine-learning strategy with a Streamlit dashboard — explained in
+            plain English, at a principal-engineer level of depth. Every example
+            is copy-pasteable and runs for real, and you'll learn to build tools
+            that are <em>better</em> than the off-the-shelf libraries.
+          </p>
+        </div>
+
+        <div class="callout concept">
+          <div class="callout-title">🎯 What you'll be able to do by the end</div>
+          <p>
+            Write trading algorithms, scanners, indicators, backtests, and ML
+            models at the deepest level using NumPy, pandas, Polars, DuckDB,
+            TA-Lib, pandas-ta, vectorbt, Numba, scikit-learn, XGBoost/LightGBM,
+            Optuna, QuantStats, and Streamlit — and know <em>why</em> each line
+            is correct, fast, and free of look-ahead bias.
+          </p>
+        </div>
+
+        <div class="lib-grid">
+          <span class="lib-chip">NumPy</span><span class="lib-chip">pandas</span>
+          <span class="lib-chip">Polars</span><span class="lib-chip">DuckDB</span>
+          <span class="lib-chip">TA-Lib</span><span class="lib-chip">pandas-ta</span>
+          <span class="lib-chip">vectorbt</span><span class="lib-chip">Numba</span>
+          <span class="lib-chip">scikit-learn</span><span class="lib-chip">XGBoost</span>
+          <span class="lib-chip">LightGBM</span><span class="lib-chip">Optuna</span>
+          <span class="lib-chip">QuantStats</span><span class="lib-chip">Streamlit</span>
+        </div>
+
+        <h2>How this course works</h2>
+        <ul>
+          <li><strong>Narrated &amp; deep.</strong> Each lesson goes
+            concept → mechanism → implementation → "build a better one" → pitfalls.
+            We never stop at "call this function."</li>
+          <li><strong>Copy-to-local execution.</strong> The code panes are full
+            Monaco editors with <em>Copy</em> and <em>Download .py</em> buttons.
+            Run everything against a real local Python install — the only way
+            TA-Lib, vectorbt, Numba, and XGBoost actually work. See
+            <a href="lessons/00-setup.html">Module 0</a> for setup.</li>
+          <li><strong>Provider-agnostic data.</strong> Examples use free Yahoo
+            Finance through a <code>DataProvider</code> abstraction, so switching
+            to Alpaca, Polygon, IBKR, or crypto (CCXT) is a one-line change.</li>
+          <li><strong>Tested.</strong> A real <code>pytest</code> suite validates
+            indicators against references/TA-Lib and computes verified strategy
+            stats from multiple indicators with custom settings.</li>
+          <li><strong>Navigate</strong> with the sidebar or the
+            <em>Previous / Next</em> buttons on every lesson. Your progress is
+            saved in your browser.</li>
+        </ul>
+
+        <div class="callout better">
+          <div class="callout-title">🧱 The QuantLab package</div>
+          <p>
+            Alongside the lessons you build a reusable Python package,
+            <code>quantlab/</code>: a normalized data layer, a from-scratch
+            indicator library, a DuckDB market-data warehouse, and (in later
+            modules) a backtest + stats engine and an ML pipeline. The course
+            <em>is</em> the construction of a production-grade quant toolkit.
+          </p>
+        </div>
+
+        <h2>Curriculum</h2>
+        <div id="curriculum"><!-- built below by inline script --></div>
+
+        <h2>Prerequisites</h2>
+        <p>
+          Comfort reading Python. No prior quant-finance or heavy-math
+          background is assumed — we build the statistics and market mechanics
+          as we go. Start with <a href="lessons/00-setup.html">Module 0</a>.
+        </p>
+
+        <div class="lesson-nav">
+          <a class="next" href="lessons/00-setup.html" style="flex:1">
+            <span class="dir">Begin →</span>
+            <span class="title">Module 0 · Setup &amp; the Principal-Engineer Mindset</span>
+          </a>
+        </div>
+
+      </div>
+    </main>
+  </div>
+
+  <script src="assets/js/manifest.js"></script>
+  <script>
+    // Render the curriculum cards from the same manifest the sidebar uses.
+    (function () {
+      var host = document.getElementById("curriculum");
+      var m = window.QUANTLAB_MANIFEST || [];
+      var lastModule = null, card = null, list = null;
+      m.forEach(function (l) {
+        if (l.module !== lastModule) {
+          card = document.createElement("div");
+          card.className = "module-card";
+          var h = document.createElement("h3");
+          h.textContent = l.module;
+          card.appendChild(h);
+          list = document.createElement("ul");
+          card.appendChild(list);
+          host.appendChild(card);
+          lastModule = l.module;
+        }
+        var li = document.createElement("li");
+        var a = document.createElement("a");
+        a.href = "lessons/" + l.id + ".html";
+        a.textContent = l.title;
+        li.appendChild(a);
+        var tag = document.createElement("span");
+        tag.className = "status-tag " + (l.status === "ready" ? "ready" : "soon");
+        tag.textContent = l.status === "ready" ? "ready" : "coming soon";
+        li.appendChild(tag);
+        list.appendChild(li);
+      });
+    })();
+  </script>
+  <script src="assets/js/course.js"></script>
+</body>
+</html>

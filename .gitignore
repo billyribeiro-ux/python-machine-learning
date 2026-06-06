@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.env
+
+# QuantLab local data (cache + parquet data lake) — regenerate via the provider
+data/cache/
+data/lake/
+data/*.parquet
+
+# Tooling
+.pytest_cache/
+.ipynb_checkpoints/
+.DS_Store
+.idea/
+.vscode/

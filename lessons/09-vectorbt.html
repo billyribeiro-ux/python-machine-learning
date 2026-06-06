@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QuantLab — vectorbt: Combine Indicators at Scale</title>
+  <link rel="stylesheet" href="../assets/css/course.css" />
+</head>
+<body data-root="lessons" data-lesson-id="09-vectorbt">
+  <div class="layout">
+    <nav class="sidebar"></nav>
+    <main class="content">
+      <div class="content-inner">
+
+        <p class="eyebrow">Module 9 · Backtesting</p>
+        <h1>vectorbt: Combine Indicators at Scale</h1>
+        <p class="lead">vectorbt turns backtesting into array math: test thousands of indicator/parameter combinations at once and get a stats grid. This is the engine for 'combine multiple indicators with custom settings and come up with the stats' at industrial scale.</p>
+        <div class="progress-pill" data-progress></div>
+
+        <div class="callout tryit">
+          <div class="callout-title">🚧 Full lesson in progress</div>
+          <p>
+            The course is being written module-by-module for maximum depth. This
+            lesson's detailed outline is below so you can see exactly what it will
+            cover — and the underlying <code>quantlab</code> package code it builds
+            on already exists and is tested. Modules 0–4 are complete and runnable;
+            work through those first.
+          </p>
+        </div>
+
+        <h2>What this lesson will cover</h2>
+                <h3>From our engine to vectorbt</h3>
+        <p>Map the leak-free model from quantlab.backtest onto Portfolio.from_signals — same rules (decide on t, act on t+1), vastly more throughput.</p>
+        <h3>IndicatorFactory</h3>
+        <p>Wrap any of our indicators so vectorbt can sweep their parameters across a grid (e.g. all SMA fast/slow pairs) in one vectorized run.</p>
+        <h3>Parameter sweeps & combinations</h3>
+        <p>Cartesian products of settings across multiple indicators, producing a multi-index stats table (Sharpe, return, drawdown per combo).</p>
+        <h3>Reading the stats grid</h3>
+        <p>Heatmaps of Sharpe over parameter space, and the danger of picking the single best cell (overfitting — Module 10/13).</p>
+        <h3>Costs, slippage, and position sizing</h3>
+        <p>Realistic fills, fees, and sizing so the swept stats mean something.</p>
+
+        <div class="callout better">
+          <div class="callout-title">🧱 Already in the repo</div>
+          <p>
+            The reusable building blocks for this module live in the
+            <code>quantlab/</code> package (data layer, indicators, backtest +
+            stats engine, strategy combiner) and are exercised by the
+            <code>tests/</code> suite. The lesson narration will show you how they
+            were built and how to extend them.
+          </p>
+        </div>
+
+        <div class="lesson-nav" data-lesson-nav></div>
+      </div>
+    </main>
+  </div>
+  <script src="../assets/js/manifest.js"></script>
+  <script src="../assets/js/course.js"></script>
+</body>
+</html>
