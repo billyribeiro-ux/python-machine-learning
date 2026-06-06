@@ -14,40 +14,157 @@
 
         <p class="eyebrow">Module 9 · Backtesting</p>
         <h1>vectorbt: Combine Indicators at Scale</h1>
-        <p class="lead">vectorbt turns backtesting into array math: test thousands of indicator/parameter combinations at once and get a stats grid. This is the engine for 'combine multiple indicators with custom settings and come up with the stats' at industrial scale.</p>
+        <p class="lead">
+          Our own engine taught you what a backtest <em>is</em>. vectorbt makes
+          it industrial: it turns backtesting into array math so you can evaluate
+          <strong>thousands</strong> of indicator/parameter combinations at once
+          and get a stats grid. This is "combine multiple indicators with custom
+          settings and come up with the stats" at full scale.
+        </p>
         <div class="progress-pill" data-progress></div>
 
-        <div class="callout tryit">
-          <div class="callout-title">🚧 Full lesson in progress</div>
+        <h2>1. From our engine to vectorbt</h2>
+        <p>
+          In Module 0/10 our <code>backtest_signal</code> converts one signal
+          into returns, honoring "decide on t, act on t+1." vectorbt does the
+          same thing but vectorized across whole grids of parameters and assets
+          simultaneously, with built-in fees, slippage, and a rich stats/plotting
+          layer. The mental model is identical; the throughput is orders of
+          magnitude higher.
+        </p>
+        <div class="callout concept">
+          <div class="callout-title">🎯 The core call</div>
           <p>
-            The course is being written module-by-module for maximum depth. This
-            lesson's detailed outline is below so you can see exactly what it will
-            cover — and the underlying <code>quantlab</code> package code it builds
-            on already exists and is tested. Modules 0–4 are complete and runnable;
-            work through those first.
+            <code>vbt.Portfolio.from_signals(close, entries, exits, fees=...)</code>
+            takes boolean entry/exit arrays and produces a Portfolio object with
+            <code>.total_return()</code>, <code>.sharpe_ratio()</code>,
+            <code>.max_drawdown()</code>, and dozens more — and it broadcasts, so
+            <code>entries</code>/<code>exits</code> can be 2-D (one column per
+            parameter combo).
           </p>
         </div>
 
-        <h2>What this lesson will cover</h2>
-                <h3>From our engine to vectorbt</h3>
-        <p>Map the leak-free model from quantlab.backtest onto Portfolio.from_signals — same rules (decide on t, act on t+1), vastly more throughput.</p>
-        <h3>IndicatorFactory</h3>
-        <p>Wrap any of our indicators so vectorbt can sweep their parameters across a grid (e.g. all SMA fast/slow pairs) in one vectorized run.</p>
-        <h3>Parameter sweeps & combinations</h3>
-        <p>Cartesian products of settings across multiple indicators, producing a multi-index stats table (Sharpe, return, drawdown per combo).</p>
-        <h3>Reading the stats grid</h3>
-        <p>Heatmaps of Sharpe over parameter space, and the danger of picking the single best cell (overfitting — Module 10/13).</p>
-        <h3>Costs, slippage, and position sizing</h3>
-        <p>Realistic fills, fees, and sizing so the swept stats mean something.</p>
+        <h2>2. Sweep a single indicator's parameters</h2>
+        <p>
+          The classic: which SMA crossover is best? Instead of a loop you'd
+          normally write, our helper
+          (<code>quantlab/backtest/vbt.py</code>) runs every fast/slow pair and
+          returns a stats table ranked by Sharpe.
+        </p>
+        <div class="code-block" data-filename="vbt_helper.py">
+<textarea class="src"># The essence of quantlab/backtest/vbt.py :: sweep_sma_crossover
+import vectorbt as vbt
+import pandas as pd
+from quantlab.indicators import sma
+
+def one_combo(close, fast, slow, fees=0.0005):
+    f = pd.Series(sma(close.to_numpy(), fast), index=close.index)
+    s = pd.Series(sma(close.to_numpy(), slow), index=close.index)
+    entries = (f > s) & (f.shift(1) <= s.shift(1))     # cross up
+    exits   = (f < s) & (f.shift(1) >= s.shift(1))     # cross down
+    pf = vbt.Portfolio.from_signals(close, entries.fillna(False),
+                                    exits.fillna(False), fees=fees, freq="1D")
+    return pf.sharpe_ratio(), pf.total_return(), pf.max_drawdown()</textarea>
+        </div>
+
+        <h2>3. Runnable: combine multiple indicators across a grid</h2>
+        <div class="code-block" data-filename="code/m9_vectorbt.py">
+<textarea class="src">"""Module 9 — vectorbt parameter sweeps: combine indicators with custom
+settings and collect a stats grid, all at once.
+"""
+from quantlab.data import get_provider
+from quantlab.backtest.vbt import combo_sweep, sweep_sma_crossover
+
+close = get_provider("yahoo").get_ohlcv("SPY", start="2010-01-01")["close"]
+
+# 1) Every SMA fast/slow crossover -> stats table, ranked by Sharpe.
+print("=== SMA crossover sweep (top 5 by Sharpe) ===")
+print(sweep_sma_crossover(close).head(5).round(3))
+
+# 2) A MULTI-indicator combo grid: RSI floor x z-entry (trend fixed).
+print("\n=== Combo sweep: RSI floor x z-entry (top 5 by Sharpe) ===")
+print(combo_sweep(close).head(5).round(3))</textarea>
+        </div>
+        <p class="output-label">Expected output (shape)</p>
+        <div class="output">=== SMA crossover sweep (top 5 by Sharpe) ===
+            total_return  sharpe  max_drawdown
+fast slow
+20   140          3.579   0.852        -0.315
+...
+=== Combo sweep: RSI floor x z-entry (top 5 by Sharpe) ===
+                   total_return  sharpe  max_drawdown
+rsi_floor z_entry
+40        1.0             0.670   0.479        -0.205
+...</div>
+
+        <h2>4. IndicatorFactory: wrap your own indicators</h2>
+        <p>
+          vectorbt's <code>IndicatorFactory</code> turns any function into a
+          parameterized, sweepable indicator with broadcasting. You can wrap the
+          QuantLab indicators directly, so a sweep over, say, RSI window × z-score
+          window runs as one vectorized operation rather than a Python loop.
+        </p>
+        <div class="code-block" data-filename="vbt_factory.py">
+<textarea class="src">import vectorbt as vbt
+import numpy as np
+from quantlab.indicators import rsi
+
+# Wrap our RSI so vectorbt can sweep `window` across a grid.
+RSIind = vbt.IndicatorFactory(
+    class_name="RSI", input_names=["close"],
+    param_names=["window"], output_names=["rsi"],
+).from_apply_func(lambda close, window: rsi(close, window))
+
+# Compute RSI for several windows at once -> a multi-column output.
+out = RSIind.run(close.to_numpy(), window=[7, 14, 21])
+print(out.rsi.shape)   # (n_bars, 3) — one column per window, vectorized</textarea>
+        </div>
+
+        <div class="callout pitfall">
+          <div class="callout-title">⚠️ The best cell is probably luck</div>
+          <p>
+            When you sweep 10,000 combinations and pick the highest Sharpe,
+            you've run 10,000 hypothesis tests and kept the luckiest one. Its
+            in-sample Sharpe is an <em>upward-biased</em> estimate of live
+            performance — the multiple-testing problem. Module 10 covers
+            walk-forward validation and the "deflated" Sharpe; Module 13 uses
+            Optuna with proper out-of-sample checks. <strong>Never trade the top
+            cell of a grid without out-of-sample confirmation.</strong>
+          </p>
+        </div>
 
         <div class="callout better">
-          <div class="callout-title">🧱 Already in the repo</div>
+          <div class="callout-title">🧱 Two engines, one philosophy</div>
           <p>
-            The reusable building blocks for this module live in the
-            <code>quantlab/</code> package (data layer, indicators, backtest +
-            stats engine, strategy combiner) and are exercised by the
-            <code>tests/</code> suite. The lesson narration will show you how they
-            were built and how to extend them.
+            Use <code>quantlab.backtest.engine</code> when you want to
+            <em>understand</em> a single strategy and assert invariants in tests;
+            use vectorbt when you want to <em>explore</em> a huge parameter space
+            fast. Both honor the one-bar execution delay. Keeping a transparent
+            reference engine alongside the fast one is how you keep the fast one
+            honest.
+          </p>
+        </div>
+
+        <div class="callout tryit">
+          <div class="callout-title">🛠️ Try it</div>
+          <p>
+            Extend <code>combo_sweep</code> to also sweep the slow-SMA length
+            (three nested parameters now). Render the resulting Sharpe surface as
+            a heatmap with <code>pf.sharpe_ratio().vbt.heatmap()</code> or via
+            pandas <code>pivot</code> + matplotlib. Notice whether good Sharpes
+            cluster (a robust region — good) or appear as isolated spikes (overfit
+            — bad). Reading that surface is a core quant skill.
+          </p>
+        </div>
+
+        <div class="callout concept">
+          <div class="callout-title">✅ You now master</div>
+          <p>
+            <code>Portfolio.from_signals</code>, vectorized parameter sweeps over
+            single and combined indicators, <code>IndicatorFactory</code>, reading
+            a stats grid, and the multiple-testing trap. Next we judge these
+            results honestly with <strong>QuantStats</strong> and walk-forward
+            testing.
           </p>
         </div>
 

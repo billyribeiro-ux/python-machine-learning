@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>QuantLab — Options: Chains, IV & Greeks</title>
+  <title>QuantLab — Options: Chains, IV &amp; Greeks</title>
   <link rel="stylesheet" href="../assets/css/course.css" />
 </head>
 <body data-root="lessons" data-lesson-id="15-options">
@@ -13,41 +13,154 @@
       <div class="content-inner">
 
         <p class="eyebrow">Module 15 · Putting It Together</p>
-        <h1>Options: Chains, IV & Greeks</h1>
-        <p class="lead">Bring options into QuantLab: pull chains through the provider, compute implied volatility and greeks, and scan for setups.</p>
+        <h1>Options: Chains, IV &amp; Greeks</h1>
+        <p class="lead">
+          Options add a second dimension — volatility — to trading. We pull chains
+          through the same provider interface, then build Black-Scholes pricing,
+          the Greeks, and implied volatility <em>from scratch</em> in vectorized
+          NumPy, so you understand and trust every number on the surface.
+        </p>
         <div class="progress-pill" data-progress></div>
 
-        <div class="callout tryit">
-          <div class="callout-title">🚧 Full lesson in progress</div>
+        <h2>1. Options data through the provider</h2>
+        <p>
+          We already implemented <code>get_options_chain</code> on
+          <code>YahooProvider</code>: it returns a single tidy frame of calls
+          <em>and</em> puts, each row tagged with <code>option_type</code> and
+          <code>expiry</code>. Same philosophy as OHLCV — a normalized shape you
+          can filter, scan, and compute on, regardless of vendor.
+        </p>
+        <div class="code-block" data-filename="options_chain.py">
+<textarea class="src">from quantlab.data import get_provider
+
+provider = get_provider("yahoo")
+chain = provider.get_options_chain("SPY")          # nearest expiry by default
+print(chain["option_type"].value_counts())
+print(chain[chain.option_type == "call"]
+      [["strike", "bid", "ask", "impliedvolatility", "volume"]].head())</textarea>
+        </div>
+
+        <h2>2. Black-Scholes from first principles</h2>
+        <p>
+          The Black-Scholes price is the discounted, risk-neutral expected payoff
+          of a European option. Our <code>quantlab/options/black_scholes.py</code>
+          implements it vectorized — pass scalars or whole arrays (an entire
+          chain at once). The two intermediate quantities <code>d1</code> and
+          <code>d2</code> drive both the price and every Greek.
+        </p>
+        <div class="code-block" data-filename="bs_price.py">
+<textarea class="src">from quantlab.options import bs_price
+
+# S=spot, K=strike, T=years to expiry, r=rate, sigma=vol
+call = bs_price(S=100, K=100, T=0.5, r=0.02, sigma=0.25, option_type="call")
+put  = bs_price(S=100, K=100, T=0.5, r=0.02, sigma=0.25, option_type="put")
+print(f"ATM call={call:.3f}  put={put:.3f}")
+# Put-call parity sanity check: C - P == S - K*exp(-rT)
+import numpy as np
+print("parity holds:", np.isclose(call - put, 100 - 100*np.exp(-0.02*0.5)))</textarea>
+        </div>
+
+        <h2>3. The Greeks — your risk dashboard</h2>
+        <p>
+          The Greeks are the option's sensitivities, and trading options
+          <em>is</em> trading Greeks. Delta (spot), gamma (delta's convexity),
+          vega (volatility), theta (time decay), rho (rates). Ours returns all
+          five at once, vectorized over a chain.
+        </p>
+        <div class="code-block" data-filename="greeks.py">
+<textarea class="src">from quantlab.options import greeks
+
+g = greeks(S=100, K=100, T=0.5, r=0.02, sigma=0.25, option_type="call")
+print(f"delta={g['delta']:.3f}  (≈ hedge ratio / P[ITM]-ish)")
+print(f"gamma={g['gamma']:.4f}  (delta's sensitivity to spot)")
+print(f"vega ={g['vega']/100:.3f} per 1% vol")
+print(f"theta={g['theta']/365:.3f} per calendar day  (time decay)")</textarea>
+        </div>
+
+        <h2>4. Implied volatility: invert the model</h2>
+        <p>
+          The market quotes a price; IV is the volatility that makes Black-Scholes
+          reproduce it. There's no closed form, so we solve numerically. Our
+          implementation uses <strong>bisection</strong> — slower than
+          Newton-Raphson but rock-solid: it can't diverge, and it handles the
+          deep ITM/OTM cases where vega→0 breaks Newton. For a scanner over
+          thousands of contracts, robustness beats raw speed.
+        </p>
+        <div class="code-block" data-filename="code/m15_options.py">
+<textarea class="src">"""Module 15 — options: pricing, greeks, implied volatility, and a chain scan."""
+import numpy as np, pandas as pd
+from quantlab.data import get_provider
+from quantlab.options import bs_price, greeks, implied_vol
+
+# Round-trip proof: price at sigma=0.25, recover sigma from the price.
+S,K,T,r,sigma = 100,100,0.5,0.02,0.25
+call = bs_price(S,K,T,r,sigma,"call")
+iv = implied_vol(call, S, K, T, r, "call")
+print(f"call={call:.3f}  recovered IV={float(iv):.4f} (input 0.25)")
+
+# Layer OUR IV onto a real chain and compare to the vendor's reported IV.
+provider = get_provider("yahoo")
+chain = provider.get_options_chain("SPY")
+spot = provider.get_ohlcv("SPY", start="2024-01-01")["close"].iloc[-1]
+expiry = pd.Timestamp(chain["expiry"].iloc[0])
+T = max((expiry - pd.Timestamp.utcnow().tz_localize(None)).days, 1)/365
+calls = chain[chain.option_type == "call"].copy()
+mid = (calls["bid"] + calls["ask"]) / 2
+calls["iv_ours"] = implied_vol(mid.to_numpy(), spot, calls["strike"].to_numpy(),
+                               T, 0.04, "call")
+near = calls.reindex(calls["strike"].sub(spot).abs().sort_values().index).head(5)
+print(near[["strike","bid","ask","impliedvolatility","iv_ours"]].round(4).to_string(index=False))</textarea>
+        </div>
+        <p class="output-label">Expected output (numbers vary)</p>
+        <div class="output">call=7.517  recovered IV=0.2500 (input 0.25)
+ strike   bid   ask  impliedvolatility  iv_ours
+  738.0  2.41  2.45             0.1000   0.1695
+  ...</div>
+        <div class="callout pitfall">
+          <div class="callout-title">⚠️ Your IV won't exactly match the vendor's</div>
           <p>
-            The course is being written module-by-module for maximum depth. This
-            lesson's detailed outline is below so you can see exactly what it will
-            cover — and the underlying <code>quantlab</code> package code it builds
-            on already exists and is tested. Modules 0–4 are complete and runnable;
-            work through those first.
+            Expect divergence, especially for near-expiry contracts (tiny T makes
+            IV hyper-sensitive) and because vendors use different rate/dividend
+            assumptions, American-style early-exercise models, and last-trade vs
+            mid prices. The round-trip test (0.25 → 0.2500) proves our math is
+            correct; the chain difference is a modeling-assumption gap, not a bug.
+            Knowing <em>why</em> they differ is the mark of understanding the model
+            rather than calling a black box.
           </p>
         </div>
 
-        <h2>What this lesson will cover</h2>
-                <h3>Options data via the provider</h3>
-        <p>get_options_chain (already implemented on YahooProvider) returns a tidy calls+puts frame tagged by type and expiry.</p>
-        <h3>Black-Scholes & implied volatility</h3>
-        <p>Pricing, solving for IV, and the greeks (delta, gamma, theta, vega) from scratch — vectorized in NumPy.</p>
-        <h3>The volatility surface</h3>
-        <p>IV across strikes/expiries, skew, and term structure; building and visualizing the surface.</p>
-        <h3>Simple options strategies</h3>
-        <p>Covered calls, verticals, and their payoff/risk profiles, evaluated with our stats engine.</p>
-        <h3>Options scanners</h3>
-        <p>Screening for high-IV-rank premium selling or cheap convexity, ranked across underlyings.</p>
+        <h2>5. From Greeks to strategies and scans</h2>
+        <p>
+          With pricing, Greeks, and IV in hand you can evaluate real structures —
+          covered calls, vertical spreads — by their payoff and risk profile, and
+          build options scanners: rank underlyings by <strong>IV rank</strong>
+          (current IV vs its 1-year range) to find rich premium for selling, or
+          cheap convexity for buying; screen for delta-targeted strikes; flag
+          unusual volume. The same scan-and-rank pattern from Module 14, applied
+          to the chain.
+        </p>
 
-        <div class="callout better">
-          <div class="callout-title">🧱 Already in the repo</div>
+        <div class="callout tryit">
+          <div class="callout-title">🛠️ Try it</div>
           <p>
-            The reusable building blocks for this module live in the
-            <code>quantlab/</code> package (data layer, indicators, backtest +
-            stats engine, strategy combiner) and are exercised by the
-            <code>tests/</code> suite. The lesson narration will show you how they
-            were built and how to extend them.
+            Build a covered-call screen: for each name in a universe, pull the
+            chain, find the ~30-delta call ~30 days out (use our
+            <code>greeks</code> to locate the strike whose delta ≈ 0.30), and rank
+            by annualized premium yield (call mid ÷ spot, scaled to a year). Add
+            an IV-rank filter to prefer selling when volatility is historically
+            high. You've built an income-strategy scanner on your own pricing
+            engine.
+          </p>
+        </div>
+
+        <div class="callout concept">
+          <div class="callout-title">✅ You now master</div>
+          <p>
+            Pulling normalized options chains, Black-Scholes pricing and put-call
+            parity, all five Greeks (vectorized), robust implied-vol inversion by
+            bisection, why your IV differs from a vendor's, and the path to
+            options strategies and scanners. Next we wrap the entire toolkit in an
+            interactive dashboard.
           </p>
         </div>
 

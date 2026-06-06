@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>QuantLab — Testing & Quality at Scale</title>
+  <title>QuantLab — Testing &amp; Quality at Scale</title>
   <link rel="stylesheet" href="../assets/css/course.css" />
 </head>
 <body data-root="lessons" data-lesson-id="17-testing">
@@ -13,41 +13,214 @@
       <div class="content-inner">
 
         <p class="eyebrow">Module 17 · Putting It Together</p>
-        <h1>Testing & Quality at Scale</h1>
-        <p class="lead">Make correctness a habit: known-value indicator tests, property-based testing, backtest invariants, and the full multi-indicator stats regression that guards your edge.</p>
+        <h1>Testing &amp; Quality at Scale</h1>
+        <p class="lead">
+          The habit that makes everything else trustworthy. We turn correctness
+          into automated guarantees: known-value indicator tests, property-based
+          tests over random inputs, backtest invariants that catch look-ahead,
+          and a regression on the combined-indicator stats — so a refactor can
+          never silently change your edge.
+        </p>
         <div class="progress-pill" data-progress></div>
 
-        <div class="callout tryit">
-          <div class="callout-title">🚧 Full lesson in progress</div>
+        <h2>1. Why testing is non-negotiable in quant</h2>
+        <p>
+          In most software a bug throws an error. In quant, a bug usually returns
+          a <em>plausible wrong number</em>: an off-by-one rolling window, a
+          look-ahead shift, an axis flipped. The code runs, the chart looks fine,
+          and you trade a lie. Tests are how you make wrong-but-plausible
+          <em>impossible</em>. Every indicator and backtest in QuantLab has a test
+          that fails loudly the day its behavior changes.
+        </p>
+        <div class="code-block" data-filename="run_tests.sh" data-lang="shell">
+<textarea class="src"># The whole suite runs offline, deterministically, in well under a second:
+pytest -q
+# 24+ passed, a couple skipped (TA-Lib tests skip cleanly if it's not installed)</textarea>
+        </div>
+
+        <h2>2. Known-value &amp; cross-implementation tests</h2>
+        <p>
+          The simplest guarantee: our indicators must match an <em>independent</em>
+          reference. <code>tests/test_indicators.py</code> compares our NumPy
+          indicators to pandas, to a hand-written O(n·w) reference, and — when
+          installed — to TA-Lib. NaN warmup regions are masked out of the
+          comparison (they're correct, not bugs).
+        </p>
+        <div class="code-block" data-filename="known_value_test.py">
+<textarea class="src">import numpy as np, pytest
+from quantlab.indicators import sma, rsi
+
+def _agree(a, b, atol=1e-9):
+    a, b = np.asarray(a, float), np.asarray(b, float)
+    m = ~np.isnan(a) & ~np.isnan(b)          # ignore warmup NaNs
+    return np.allclose(a[m], b[m], atol=atol)
+
+def test_sma_matches_pandas(close):           # `close` is a pytest fixture
+    assert _agree(sma(close.to_numpy(), 20), close.rolling(20).mean().to_numpy())
+
+def test_rsi_matches_talib_if_available(close):
+    talib = pytest.importorskip("talib")      # skip cleanly if C lib absent
+    got, ref = rsi(close.to_numpy(), 14), talib.RSI(close.to_numpy(), 14)
+    assert _agree(got[20:], ref[20:], atol=1e-6)</textarea>
+        </div>
+        <div class="callout deepdive">
+          <div class="callout-title">🔬 <code>importorskip</code> = honest optional deps</div>
           <p>
-            The course is being written module-by-module for maximum depth. This
-            lesson's detailed outline is below so you can see exactly what it will
-            cover — and the underlying <code>quantlab</code> package code it builds
-            on already exists and is tested. Modules 0–4 are complete and runnable;
-            work through those first.
+            TA-Lib needs a C library not everyone has. <code>pytest.importorskip
+            ("talib")</code> turns "TA-Lib missing" into a <em>skip</em>, not a
+            failure — so the suite is green on a minimal install and still
+            validates against TA-Lib wherever it's present. Optional dependencies
+            should degrade gracefully in tests exactly as they do in code.
           </p>
         </div>
 
-        <h2>What this lesson will cover</h2>
-                <h3>Known-value & cross-implementation tests</h3>
-        <p>What tests/test_indicators.py does: match our indicators to pandas and (optionally) TA-Lib, ignoring warmup NaNs.</p>
-        <h3>Property-based testing with Hypothesis</h3>
-        <p>Assert invariants over RANDOM inputs: RSI always in [0,100], ATR >= 0, SMA within [min,max] of its window, no look-ahead.</p>
-        <h3>Backtest invariants</h3>
-        <p>The leak guard (tests/test_strategy_stats.py): one-bar execution delay, costs only reduce returns, drawdown <= 0, equity reconciles with total return.</p>
-        <h3>Regression-testing the stats</h3>
-        <p>Pin the combo strategy's stats on fixed synthetic data so a refactor that changes results fails loudly.</p>
-        <h3>CI & coverage</h3>
-        <p>Running pytest on every change, skipping heavy/optional deps cleanly with importorskip, and keeping the suite fast and offline.</p>
+        <h2>3. Property-based testing with Hypothesis</h2>
+        <p>
+          Example-based tests check the cases you thought of. <strong>Property</strong>
+          tests check <em>invariants</em> over thousands of <em>random</em> inputs
+          Hypothesis generates for you — and when one fails, it shrinks the input
+          to a minimal counterexample. The invariants below must hold for
+          <em>any</em> price series, which is a far stronger statement than "works
+          on AAPL."
+        </p>
+        <div class="code-block" data-filename="tests/test_properties.py">
+<textarea class="src">import numpy as np
+from hypothesis import given, settings
+from hypothesis import strategies as st
+from hypothesis.extra.numpy import arrays
+from quantlab.indicators import rsi, sma, rolling_zscore, atr
 
+prices = arrays(np.float64, st.integers(60, 300),
+                elements=st.floats(1.0, 1000.0, allow_nan=False))
+
+@given(prices)
+def test_rsi_always_bounded(x):
+    r = rsi(x, 14)
+    r = r[~np.isnan(r)]
+    assert np.all((r >= 0) & (r <= 100))     # RSI is bounded for ANY input
+
+@given(prices)
+def test_sma_within_window_bounds(x):
+    s = sma(x, 10)
+    for i in range(9, len(x)):
+        assert x[i-9:i+1].min() - 1e-9 <= s[i] <= x[i-9:i+1].max() + 1e-9
+
+@given(prices)
+@settings(max_examples=200)
+def test_zscore_no_lookahead(x):
+    # Truncating the future must not change past z-scores (no peeking).
+    z_full = rolling_zscore(x, 20)
+    k = len(x) - 5
+    z_trunc = rolling_zscore(x[:k], 20)
+    m = ~np.isnan(z_full[:k]) & ~np.isnan(z_trunc)
+    assert np.allclose(z_full[:k][m], z_trunc[m])</textarea>
+        </div>
         <div class="callout better">
-          <div class="callout-title">🧱 Already in the repo</div>
+          <div class="callout-title">🧱 The no-look-ahead property is the crown jewel</div>
           <p>
-            The reusable building blocks for this module live in the
-            <code>quantlab/</code> package (data layer, indicators, backtest +
-            stats engine, strategy combiner) and are exercised by the
-            <code>tests/</code> suite. The lesson narration will show you how they
-            were built and how to extend them.
+            <code>test_zscore_no_lookahead</code> encodes the rule that has run
+            through this entire course as a machine-checked property: the
+            indicator's value at past bars must not change when you add or remove
+            future bars. If a refactor ever introduces a peek, Hypothesis will
+            find a series that exposes it. You can — and should — assert this for
+            every indicator you write.
+          </p>
+        </div>
+
+        <h2>4. Backtest invariants</h2>
+        <p>
+          <code>tests/test_strategy_stats.py</code> guards the engine itself with
+          properties that any correct backtest must satisfy:
+        </p>
+        <ul>
+          <li><strong>One-bar execution delay</strong> — an always-long signal
+            earns the asset's return shifted by one bar (proves no peeking).</li>
+          <li><strong>Costs only reduce returns</strong> — turning on fees can
+            never increase total return.</li>
+          <li><strong>Drawdown ≤ 0</strong>, <strong>win rate ∈ [0,1]</strong>,
+            and the <strong>equity curve reconciles</strong> with total return.</li>
+          <li><strong>Settings actually bite</strong> — different ComboParams must
+            produce different positions (else the parameters aren't wired in).</li>
+        </ul>
+        <div class="code-block" data-filename="invariant_test.py">
+<textarea class="src">import numpy as np, pandas as pd
+from quantlab.backtest import backtest_signal
+
+def test_engine_applies_one_bar_delay(close):
+    always_long = pd.Series(1.0, index=close.index)
+    res = backtest_signal(close, always_long, fee_bps=0.0)
+    asset = close.pct_change()
+    # From bar 2 on (position is 1), strat return == asset return: the proof
+    # that the engine acts on t+1, never on the same bar it decided.
+    assert np.allclose(res["returns"].iloc[2:].to_numpy(),
+                       asset.iloc[2:].to_numpy(), atol=1e-12)</textarea>
+        </div>
+
+        <h2>5. Regression-test the combined-indicator stats</h2>
+        <p>
+          The capstone: combine multiple indicators with custom settings, run the
+          leak-free backtest, and <em>pin</em> the resulting stats on fixed
+          synthetic data. Now any change that alters the numbers fails the
+          test — you'll know immediately whether a "harmless" refactor moved your
+          edge. This is the user's original goal, frozen into a guardrail.
+        </p>
+        <div class="code-block" data-filename="regression_test.py">
+<textarea class="src">from quantlab.strategies import run_combo, ComboParams
+
+def test_combo_stats_regression(close):       # `close` = deterministic fixture
+    res = run_combo(close, ComboParams(fast=10, slow=50, rsi_floor=45, z_entry=0.0))
+    s = res["stats"]
+    # Internal consistency (always true) + pinned shape of the result.
+    assert s["max_drawdown"] <= 0.0
+    assert 0.0 <= s["win_rate"] <= 1.0
+    assert set(res["params"]) >= {"fast", "slow", "rsi_floor", "z_entry"}
+    # (In your repo, pin exact values once verified, e.g.:
+    #  assert round(s["sharpe"], 4) == EXPECTED_SHARPE )</textarea>
+        </div>
+
+        <div class="callout deepdive">
+          <div class="callout-title">🔬 Fast, offline, deterministic</div>
+          <p>
+            <code>tests/conftest.py</code> synthesizes OHLCV with a <em>seeded</em>
+            generator and serves it through a <code>FakeProvider</code> — so the
+            whole suite runs without a network, gives the same answer every time,
+            and finishes in well under a second. That's what lets you run it on
+            every save and in CI: a slow or flaky suite is a suite people stop
+            running.
+          </p>
+        </div>
+
+        <h2>6. CI &amp; coverage</h2>
+        <ul>
+          <li>Run <code>pytest -q</code> on every push (GitHub Actions: a few
+            lines of YAML). Green-on-merge is the contract.</li>
+          <li>Gate heavy/optional deps with <code>importorskip</code> so CI stays
+            fast and doesn't require TA-Lib's C library.</li>
+          <li>Track coverage, but value the <em>right</em> tests (invariants,
+            no-look-ahead, stats reconciliation) over a coverage percentage.</li>
+        </ul>
+
+        <div class="callout tryit">
+          <div class="callout-title">🛠️ Try it</div>
+          <p>
+            Write a Hypothesis property for <code>atr</code>: for any
+            high≥low≥0 arrays, ATR must be ≥ 0 and never exceed the maximum
+            true range seen so far. Then add a no-look-ahead property for
+            <code>rsi</code> (truncating the future must not change past values).
+            Run <code>pytest -q</code> and watch your guarantees grow.
+          </p>
+        </div>
+
+        <div class="callout concept">
+          <div class="callout-title">🎓 You've finished QuantLab</div>
+          <p>
+            From the memory layout of a NumPy array to a tuned, walk-forward,
+            tested trading system with a live dashboard — you now build
+            algorithms, scanners, indicators, backtests, and ML models at depth,
+            and you know <em>why</em> each is correct, fast, and free of
+            look-ahead. The five habits — vectorize, stabilize, don't peek,
+            reproduce, test — are now yours. Go build something better than what
+            exists.
           </p>
         </div>
 

@@ -14,40 +14,137 @@
 
         <p class="eyebrow">Module 16 · Putting It Together</p>
         <h1>Streamlit Trading Dashboard</h1>
-        <p class="lead">Tie everything together into an interactive app: a live scanner, a backtest explorer, ML predictions, and QuantStats tearsheets — all driven by the quantlab package.</p>
+        <p class="lead">
+          Everything you've built — data layer, indicators, backtest engine,
+          scanners — becomes an interactive app in a few hundred lines. Streamlit
+          turns Python scripts into web UIs, and because the logic already lives
+          in <code>quantlab</code>, the app is just a thin, reactive shell.
+        </p>
         <div class="progress-pill" data-progress></div>
 
-        <div class="callout tryit">
-          <div class="callout-title">🚧 Full lesson in progress</div>
+        <h2>1. Streamlit in one idea</h2>
+        <p>
+          A Streamlit app is a Python script that re-runs top-to-bottom on every
+          interaction. Widgets (<code>st.slider</code>, <code>st.text_input</code>)
+          return plain values; you compute with them and call
+          <code>st.line_chart</code>, <code>st.metric</code>,
+          <code>st.dataframe</code> to render. The mental model is "a script that
+          paints itself" — no callbacks, no front-end code.
+        </p>
+        <div class="callout pitfall">
+          <div class="callout-title">⚠️ Re-runs make caching essential</div>
           <p>
-            The course is being written module-by-module for maximum depth. This
-            lesson's detailed outline is below so you can see exactly what it will
-            cover — and the underlying <code>quantlab</code> package code it builds
-            on already exists and is tested. Modules 0–4 are complete and runnable;
-            work through those first.
+            Because the whole script re-runs on every slider nudge, a naive app
+            re-downloads data constantly. Wrap expensive, pure functions (data
+            fetches) in <code>@st.cache_data</code> so they run once per unique
+            input and return instantly thereafter. This single decorator is the
+            difference between a sluggish app and a snappy one.
           </p>
         </div>
 
-        <h2>What this lesson will cover</h2>
-                <h3>Streamlit fundamentals</h3>
-        <p>Widgets, layout, and st.cache_data for fast, reactive apps without re-fetching data.</p>
-        <h3>The scanner page</h3>
-        <p>Pick a universe and settings, run the Module 14 scan, show a ranked, sortable table with sparklines.</p>
-        <h3>The backtest explorer</h3>
-        <p>Sliders for the combo strategy's settings -> live equity curve, drawdown, and the stats bundle from quantlab.backtest.</p>
-        <h3>The ML page</h3>
-        <p>Show model predictions, feature importance/SHAP, and predicted-vs-realized performance.</p>
-        <h3>Deployment</h3>
-        <p>Caching, secrets for real data providers, and running it locally or on Streamlit Community Cloud.</p>
+        <h2>2. The QuantLab dashboard</h2>
+        <p>
+          Our app (<code>app/streamlit_app.py</code>) has three pages — a live
+          <strong>Backtester</strong>, a universe <strong>Scanner</strong>, and an
+          <strong>Indicator explorer</strong> — all driven by the same package
+          functions you already know. Note how little app-specific code there is:
+          the heavy lifting is all imports.
+        </p>
+        <div class="code-block" data-filename="app/streamlit_app.py">
+<textarea class="src">import streamlit as st
+import pandas as pd
+from quantlab.data import get_provider
+from quantlab.strategies import ComboParams, run_combo
+from quantlab.backtest.stats import equity_curve, drawdown_series
 
-        <div class="callout better">
-          <div class="callout-title">🧱 Already in the repo</div>
+st.set_page_config(page_title="QuantLab", layout="wide")
+
+@st.cache_data(show_spinner=False)          # fetch once per (symbol,start,tf)
+def load(symbol, start, timeframe):
+    return get_provider("yahoo").get_ohlcv(symbol, start=start, timeframe=timeframe)
+
+st.header("Strategy Backtester — multi-indicator combo")
+symbol = st.text_input("Symbol", "SPY")
+fast = st.slider("Fast SMA", 5, 60, 20)
+slow = st.slider("Slow SMA", 60, 250, 100)
+rsi_floor = st.slider("RSI floor", 20, 60, 40)
+z_entry = st.slider("Z-entry (pullback)", -2.0, 2.0, 0.5, 0.1)
+
+df = load(symbol, "2015-01-01", "1d")
+res = run_combo(df["close"], ComboParams(fast=fast, slow=slow,
+                                         rsi_floor=float(rsi_floor),
+                                         z_entry=float(z_entry)))
+s = res["stats"]
+c = st.columns(4)
+c[0].metric("CAGR", f"{s['cagr']:.1%}")
+c[1].metric("Sharpe", f"{s['sharpe']:.2f}")
+c[2].metric("Max DD", f"{s['max_drawdown']:.1%}")
+c[3].metric("Win rate", f"{s['win_rate']:.1%}")
+
+st.line_chart(pd.DataFrame({
+    "strategy": equity_curve(res["returns"]),
+    "buy&hold": equity_curve(df["close"].pct_change()),
+}))
+st.area_chart(drawdown_series(res["returns"]).rename("drawdown"))</textarea>
+        </div>
+
+        <h2>3. Run it</h2>
+        <div class="code-block" data-filename="run_app.sh" data-lang="shell">
+<textarea class="src"># From the repo root, with the quantlab env active:
+streamlit run app/streamlit_app.py
+# Opens http://localhost:8501 — drag the sliders and watch the equity curve,
+# drawdown, and stats update live. Switch pages in the sidebar:
+#   Backtester  — tune the combo strategy interactively
+#   Scanner     — run swing/momentum screens over a universe
+#   Indicators  — chart price with SMAs + the Numba Supertrend line</textarea>
+        </div>
+
+        <div class="callout deepdive">
+          <div class="callout-title">🔬 The scanner &amp; indicator pages</div>
           <p>
-            The reusable building blocks for this module live in the
-            <code>quantlab/</code> package (data layer, indicators, backtest +
-            stats engine, strategy combiner) and are exercised by the
-            <code>tests/</code> suite. The lesson narration will show you how they
-            were built and how to extend them.
+            The Scanner page calls <code>quantlab.scanners.scan</code> with a
+            setup chosen from a dropdown and renders the ranked hits with
+            <code>st.dataframe</code>. The Indicator page overlays SMAs and the
+            Numba-computed <code>supertrend</code> line on price. Both are a dozen
+            lines each — because the real work was done in Modules 7, 8, and 14.
+            <em>That</em> is the dividend of building a clean package: the UI is
+            almost free.
+          </p>
+        </div>
+
+        <h2>4. Deployment notes</h2>
+        <ul>
+          <li><strong>Secrets:</strong> when you move from Yahoo to a keyed
+            provider, put credentials in <code>.streamlit/secrets.toml</code> and
+            read them in your provider — never hard-code keys.</li>
+          <li><strong>Caching:</strong> use <code>@st.cache_data</code> for data
+            and <code>@st.cache_resource</code> for expensive objects (a trained
+            model, a DuckDB connection).</li>
+          <li><strong>Hosting:</strong> push to GitHub and deploy free on
+            Streamlit Community Cloud, or run it on any VM with
+            <code>streamlit run</code>. The app is provider-agnostic, so the same
+            code runs locally on Yahoo and in production on your paid feed.</li>
+        </ul>
+
+        <div class="callout tryit">
+          <div class="callout-title">🛠️ Try it</div>
+          <p>
+            Add a fourth page, "ML", that trains
+            <code>quantlab.ml.models.train_lgbm</code> on the selected symbol,
+            shows the out-of-sample accuracy/AUC with <code>st.metric</code>, plots
+            feature importances with <code>st.bar_chart</code>, and backtests the
+            <code>proba_to_signal</code> predictions — surfacing the whole Module
+            11–12 pipeline behind a single button.
+          </p>
+        </div>
+
+        <div class="callout concept">
+          <div class="callout-title">✅ You now master</div>
+          <p>
+            Streamlit's re-run model, caching for snappy apps, building a
+            multi-page dashboard from existing package functions, and deployment
+            with secrets. One module remains — the discipline that holds it all
+            together: testing &amp; quality at scale.
           </p>
         </div>
 

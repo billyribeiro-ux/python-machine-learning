@@ -14,40 +14,159 @@
 
         <p class="eyebrow">Module 7 · Indicators</p>
         <h1>Build a Better Indicator Library</h1>
-        <p class="lead">The payoff module: a unified Indicator base class + registry + custom-settings system that works across pandas, Polars, and Numba — so any indicator composes, sweeps, and tests uniformly.</p>
+        <p class="lead">
+          The payoff module. We unify NumPy, TA-Lib, pandas-ta, and Numba
+          indicators behind one <strong>registry</strong> so any indicator is
+          addressable <em>by name with settings</em>. That single abstraction is
+          what powers config-driven features, parameter sweeps (Module 9), and
+          Optuna optimization (Module 13).
+        </p>
         <div class="progress-pill" data-progress></div>
 
-        <div class="callout tryit">
-          <div class="callout-title">🚧 Full lesson in progress</div>
+        <h2>1. Why a registry beats fifty call sites</h2>
+        <p>
+          As your codebase grows, indicators get called from features, scanners,
+          backtests, and dashboards. If each call site hard-codes
+          <code>talib.RSI(...)</code> or <code>s.rolling(20).mean()</code>, then
+          changing an indicator, sweeping its parameters, or letting an optimizer
+          choose it means editing code everywhere. The fix is to make an
+          indicator <strong>data</strong>: a <code>(name, settings)</code> pair
+          that a registry resolves to a function. Now a config file, a grid, or
+          an Optuna trial can request indicators it has never heard of.
+        </p>
+        <div class="callout concept">
+          <div class="callout-title">🎯 The core idea</div>
           <p>
-            The course is being written module-by-module for maximum depth. This
-            lesson's detailed outline is below so you can see exactly what it will
-            cover — and the underlying <code>quantlab</code> package code it builds
-            on already exists and is tested. Modules 0–4 are complete and runnable;
-            work through those first.
+            <code>combine(ohlcv, [("rsi", {"window": 14}), ("zscore", {"window":
+            20})])</code> → a feature frame. The list of specs <em>is</em> the
+            configuration. Code consumes indicators it doesn't know the names of
+            at write-time. That inversion is the whole design.
           </p>
         </div>
 
-        <h2>What this lesson will cover</h2>
-                <h3>The Indicator interface</h3>
-        <p>A small ABC: params (a dataclass), compute(ohlcv) -> Series/Frame, and a name/registry key. The same pattern as quantlab.strategies.ComboParams, generalized.</p>
-        <h3>A registry & factory</h3>
-        <p>Register indicators by name so a config file (or Optuna) can request 'rsi' with {'window': 14} generically — the foundation for parameter sweeps.</p>
-        <h3>Multi-backend dispatch</h3>
-        <p>One indicator, three engines: NumPy for single series, Polars .over('symbol') for universes, Numba for path-dependent ones — chosen automatically by input type/size.</p>
-        <h3>Settings, validation, and warmup contracts</h3>
-        <p>Every indicator declares its minimum history and validates params, so misconfiguration fails loudly, not silently.</p>
-        <h3>Combining indicators generically</h3>
-        <p>A combine() that takes a list of (indicator, settings) and produces a feature frame — the engine behind the capstone 'combine multiple indicators with custom settings'.</p>
+        <h2>2. The registry, in full</h2>
+        <p>
+          The implementation (<code>quantlab/indicators/registry.py</code>) is
+          deliberately tiny: a dict from name to a function
+          <code>f(ohlcv, **params) → DataFrame</code>, a
+          <code>@register</code> decorator, and <code>combine()</code>. Each
+          built-in wraps our from-scratch NumPy indicators and returns a
+          <em>settings-named</em> column (e.g. <code>rsi_14</code>) so combined
+          frames are self-documenting.
+        </p>
+        <div class="code-block" data-filename="registry_core.py">
+<textarea class="src"># The essence of quantlab/indicators/registry.py
+from typing import Callable
+import pandas as pd
+
+REGISTRY: dict[str, Callable] = {}
+
+def register(name):
+    def deco(fn):
+        REGISTRY[name.lower()] = fn
+        return fn
+    return deco
+
+def combine(ohlcv, specs, join_input=False):
+    parts = [REGISTRY[name.lower()](ohlcv, **params) for name, params in specs]
+    out = pd.concat(parts, axis=1)
+    return ohlcv.join(out) if join_input else out
+
+@register("rsi")
+def _rsi(ohlcv, window=14, source="close"):
+    from quantlab.indicators import rsi
+    return pd.DataFrame({f"rsi_{window}": rsi(ohlcv[source].to_numpy(), window)},
+                        index=ohlcv.index)</textarea>
+        </div>
+
+        <h2>3. Runnable: combine indicators &amp; extend the library</h2>
+        <div class="code-block" data-filename="code/m7_registry.py">
+<textarea class="src">"""Module 7 — the unified indicator registry: combine by name+settings."""
+import pandas as pd
+from quantlab.data import get_provider
+from quantlab.indicators import available, combine, register
+
+df = get_provider("yahoo").get_ohlcv("MSFT", start="2020-01-01")
+print("Registered indicators:", available())
+
+# Declare a feature set as DATA (name, settings) — not code.
+specs = [
+    ("sma", {"window": 20}), ("sma", {"window": 50}),
+    ("rsi", {"window": 14}), ("zscore", {"window": 20}),
+    ("atr", {"window": 14}), ("ret", {"periods": 5}),
+]
+feats = combine(df, specs)
+print("Combined columns:", list(feats.columns))
+
+# Extend the library with ONE decorator — open for extension.
+@register("hl_range")
+def _hl_range(ohlcv, window: int = 14):
+    rng = (ohlcv["high"] - ohlcv["low"]) / ohlcv["close"]
+    return pd.DataFrame({f"hl_range_{window}": rng.rolling(window).mean()},
+                        index=ohlcv.index)
+
+print("Custom indicator registered:", "hl_range" in available())
+print(combine(df, [("hl_range", {"window": 10})]).tail(2).round(4))</textarea>
+        </div>
+        <p class="output-label">Expected output</p>
+        <div class="output">Registered indicators: ['atr', 'ewma', 'ret', 'rsi', 'sma', 'std', 'zscore']
+Combined columns: ['sma_20', 'sma_50', 'rsi_14', 'zscore_20', 'atr_14', 'ret_5']
+Custom indicator registered: True</div>
+
+        <h2>4. Multi-backend dispatch (the design that scales)</h2>
+        <p>
+          The registry's real power is that a registered indicator can be backed
+          by <em>any</em> engine. The same <code>"rsi"</code> name could resolve
+          to our NumPy version for a single series, a Polars
+          <code>.over("symbol")</code> version for a whole universe (Module 3), or
+          a Numba version for path-dependent ones (Module 8). Callers never know
+          or care which computed the column — they just ask for <code>"rsi"</code>.
+        </p>
+        <div class="callout deepdive">
+          <div class="callout-title">🔬 Settings as a typed object</div>
+          <p>
+            For strategies (not just single indicators) we go one step further
+            and use a dataclass for settings — see
+            <code>quantlab.strategies.ComboParams</code>. A dataclass is
+            hashable, loggable, diffable, and serializable, so a parameter set
+            becomes a first-class value you can store in an Optuna trial or a
+            results table. Loose <code>**kwargs</code> can't do that. This is the
+            difference between "it works" and "it scales to 10,000 experiments."
+          </p>
+        </div>
 
         <div class="callout better">
-          <div class="callout-title">🧱 Already in the repo</div>
+          <div class="callout-title">🧱 Why this is "a better library"</div>
           <p>
-            The reusable building blocks for this module live in the
-            <code>quantlab/</code> package (data layer, indicators, backtest +
-            stats engine, strategy combiner) and are exercised by the
-            <code>tests/</code> suite. The lesson narration will show you how they
-            were built and how to extend them.
+            It's <em>open for extension</em> (one decorator adds an indicator),
+            <em>uniform</em> (every indicator has the same call shape and warmup
+            discipline), <em>composable</em> (<code>combine</code> blends any
+            mix), and <em>backend-agnostic</em> (NumPy/Polars/TA-Lib/Numba behind
+            one name). Off-the-shelf libraries give you functions; this gives you
+            a <em>system</em> that the rest of QuantLab — features, sweeps,
+            optimization, the dashboard — is built on.
+          </p>
+        </div>
+
+        <div class="callout tryit">
+          <div class="callout-title">🛠️ Try it</div>
+          <p>
+            Register a <code>"donchian"</code> indicator returning the rolling
+            high and low channel (two columns), then add it to a
+            <code>combine</code> spec alongside <code>rsi</code> and
+            <code>atr</code>. Confirm <code>available()</code> now lists it and
+            the combined frame has all the columns. You've extended a production
+            indicator library in under ten lines.
+          </p>
+        </div>
+
+        <div class="callout concept">
+          <div class="callout-title">✅ You now master</div>
+          <p>
+            The registry pattern, indicators-as-data, settings-named columns,
+            one-decorator extension, multi-backend dispatch, and typed settings
+            objects. This is the backbone everything downstream plugs into. Next:
+            the indicators that <em>need</em> a loop — accelerated with Numba.
           </p>
         </div>
 

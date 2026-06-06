@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>QuantLab — Backtesting & QuantStats Tearsheets</title>
+  <title>QuantLab — Backtesting &amp; QuantStats Tearsheets</title>
   <link rel="stylesheet" href="../assets/css/course.css" />
 </head>
 <body data-root="lessons" data-lesson-id="10-quantstats">
@@ -13,41 +13,158 @@
       <div class="content-inner">
 
         <p class="eyebrow">Module 10 · Backtesting</p>
-        <h1>Backtesting & QuantStats Tearsheets</h1>
-        <p class="lead">Turn a returns series into a professional tearsheet, and learn the metrics that matter — plus walk-forward testing and the overfitting traps that invalidate most strategies.</p>
+        <h1>Backtesting &amp; QuantStats Tearsheets</h1>
+        <p class="lead">
+          A returns series isn't a result until you've measured it honestly. We
+          define the metrics that matter (and compute them from scratch), turn
+          them into a professional QuantStats tearsheet, and confront the two
+          things that invalidate most backtests: <em>overfitting</em> and
+          <em>costs</em>.
+        </p>
         <div class="progress-pill" data-progress></div>
 
-        <div class="callout tryit">
-          <div class="callout-title">🚧 Full lesson in progress</div>
+        <h2>1. The metrics, defined precisely</h2>
+        <p>
+          We never use a number we can't compute ourselves, so
+          <code>quantlab/backtest/stats.py</code> implements the core set. Know
+          what each one answers:
+        </p>
+        <table>
+          <tr><th>Metric</th><th>Answers</th></tr>
+          <tr><td>CAGR</td><td>What did I actually compound at, per year?</td></tr>
+          <tr><td>Sharpe</td><td>Return per unit of total volatility (annualized)</td></tr>
+          <tr><td>Sortino</td><td>Return per unit of <em>downside</em> volatility</td></tr>
+          <tr><td>Max drawdown</td><td>Worst peak-to-trough loss (the "could I stick with it?" number)</td></tr>
+          <tr><td>Calmar</td><td>CAGR ÷ |max drawdown| — return per unit of worst pain</td></tr>
+          <tr><td>Win rate</td><td>Fraction of active periods that were positive</td></tr>
+        </table>
+        <div class="callout deepdive">
+          <div class="callout-title">🔬 Annualization is a choice, not a constant</div>
           <p>
-            The course is being written module-by-module for maximum depth. This
-            lesson's detailed outline is below so you can see exactly what it will
-            cover — and the underlying <code>quantlab</code> package code it builds
-            on already exists and is tested. Modules 0–4 are complete and runnable;
-            work through those first.
+            Sharpe multiplies the per-period ratio by √(periods per year). Daily →
+            √252; 5-minute → √(252·78). Hard-code 252 and your intraday Sharpe is
+            silently wrong by ~9×. That's why our stats functions take a
+            <code>periods_per_year</code> argument and
+            <code>quantlab.utils.annualization_factor</code> centralizes the
+            mapping. Correctness across timeframes is a design decision.
           </p>
         </div>
 
-        <h2>What this lesson will cover</h2>
-                <h3>The full metric set</h3>
-        <p>Sharpe, Sortino, Calmar, max drawdown, exposure, tail ratio, VaR — building on quantlab.backtest.stats which already computes the core ones.</p>
-        <h3>QuantStats tearsheets</h3>
-        <p>qs.reports.html()/full() against a benchmark (SPY), and how to feed it our backtest output.</p>
-        <h3>Walk-forward & out-of-sample</h3>
-        <p>Train on a window, test on the next, roll forward — the only honest way to estimate live performance.</p>
-        <h3>Overfitting & the multiple-testing problem</h3>
-        <p>Why the best of 10,000 swept combos is probably luck; deflated Sharpe and the reality check.</p>
-        <h3>Transaction costs & capacity</h3>
-        <p>How fees, slippage, and market impact turn a paper edge into a real (or negative) one.</p>
+        <h2>2. Runnable: stats + a full tearsheet</h2>
+        <p>
+          Our <code>quantlab/backtest/tearsheet.py</code> bridges to QuantStats,
+          sanitizing the index (QuantStats predates tz-aware/non-nanosecond
+          indexes) and writing a shareable HTML report with rolling Sharpe,
+          underwater drawdown plots, and monthly heatmaps — benchmarked against
+          buy &amp; hold.
+        </p>
+        <div class="code-block" data-filename="code/m10_quantstats.py">
+<textarea class="src">"""Module 10 — backtest stats + a QuantStats tearsheet."""
+from quantlab.data import get_provider
+from quantlab.strategies import ComboParams, run_combo
+from quantlab.backtest.stats import compute_stats
+from quantlab.backtest.tearsheet import html_report
 
-        <div class="callout better">
-          <div class="callout-title">🧱 Already in the repo</div>
+df = get_provider("yahoo").get_ohlcv("SPY", start="2010-01-01")
+close = df["close"]
+
+res = run_combo(close, ComboParams(fast=20, slow=100, rsi_floor=40, z_entry=0.5))
+print("QuantLab stats bundle:")
+for k, v in res["stats"].items():
+    print(f"  {k:16s}: {v:.4f}" if isinstance(v, float) else f"  {k:16s}: {v}")
+
+bench = close.pct_change()                       # buy & hold benchmark
+print(f"\nBuy & hold Sharpe: {compute_stats(bench)['sharpe']:.3f}")
+
+# Full professional tearsheet (HTML), strategy vs benchmark.
+html_report(res["returns"], benchmark=bench, output="tearsheet.html")
+print("Wrote tearsheet.html — open it in a browser.")</textarea>
+        </div>
+
+        <h2>3. Costs and slippage: where paper edges die</h2>
+        <p>
+          Every position change pays the spread, commissions, and market impact.
+          Our engine charges costs on <em>turnover</em>; vectorbt takes
+          <code>fees</code> and <code>slippage</code>. A strategy that trades
+          often can look brilliant gross and lose money net. Always re-run with
+          realistic costs and watch how Sharpe degrades — a robust edge survives;
+          an overfit one evaporates.
+        </p>
+        <div class="code-block" data-filename="cost_sensitivity.py">
+<textarea class="src">from quantlab.data import get_provider
+from quantlab.strategies import combo_signal, ComboParams
+from quantlab.backtest import backtest_signal
+
+close = get_provider("yahoo").get_ohlcv("SPY", start="2010-01-01")["close"]
+sig = combo_signal(close, ComboParams())
+
+for bps in (0, 1, 5, 10, 25):
+    s = backtest_signal(close, sig, fee_bps=bps)["stats"]
+    print(f"fee={bps:2d}bps  return={s['total_return']:6.1%}  sharpe={s['sharpe']:.2f}")</textarea>
+        </div>
+
+        <h2>4. Walk-forward: the only honest estimate</h2>
+        <p>
+          A single in-sample backtest tells you how well you fit the past. To
+          estimate the <em>future</em>, walk forward: optimize on a window, test
+          on the next untouched window, roll, repeat. The concatenated
+          out-of-sample returns are your honest track record.
+        </p>
+        <div class="code-block" data-filename="walk_forward.py">
+<textarea class="src">import numpy as np
+import pandas as pd
+from quantlab.data import get_provider
+from quantlab.strategies import run_combo, ComboParams
+from quantlab.backtest import compute_stats
+
+close = get_provider("yahoo").get_ohlcv("SPY", start="2005-01-01")["close"]
+
+# Simple expanding walk-forward: 3y train to pick fast SMA, 1y test, roll.
+oos = []
+years = sorted({d.year for d in close.index})
+for i in range(3, len(years) - 1):
+    train = close[(close.index.year >= years[i-3]) & (close.index.year <= years[i-1])]
+    test  = close[close.index.year == years[i]]
+    # "Optimize" (toy): pick the fast SMA with best train Sharpe.
+    best = max([10, 20, 30, 50],
+               key=lambda f: run_combo(train, ComboParams(fast=f))["stats"]["sharpe"])
+    r = run_combo(test, ComboParams(fast=best))["returns"]
+    oos.append(r)
+
+oos_ret = pd.concat(oos)
+print("Out-of-sample Sharpe:", round(compute_stats(oos_ret)["sharpe"], 3))</textarea>
+        </div>
+
+        <div class="callout pitfall">
+          <div class="callout-title">⚠️ The deflated Sharpe</div>
           <p>
-            The reusable building blocks for this module live in the
-            <code>quantlab/</code> package (data layer, indicators, backtest +
-            stats engine, strategy combiner) and are exercised by the
-            <code>tests/</code> suite. The lesson narration will show you how they
-            were built and how to extend them.
+            If you tried N strategy variants and report the best Sharpe, the
+            expected maximum of N noisy estimates is high <em>even with zero real
+            edge</em>. The "deflated Sharpe ratio" adjusts for how many trials you
+            ran. Practically: track how many configurations you tested, prefer
+            robust parameter <em>regions</em> over single peaks, and always
+            validate out-of-sample. A backtest is a hypothesis, not a promise.
+          </p>
+        </div>
+
+        <div class="callout tryit">
+          <div class="callout-title">🛠️ Try it</div>
+          <p>
+            Run <code>code/m10_quantstats.py</code> and open the generated
+            <code>tearsheet.html</code>. Find the worst drawdown on the underwater
+            plot and the longest losing month on the monthly heatmap — then ask
+            yourself honestly whether you'd have held through them. That gut-check
+            is what separates a backtest from a strategy you can actually trade.
+          </p>
+        </div>
+
+        <div class="callout concept">
+          <div class="callout-title">✅ You now master</div>
+          <p>
+            The core risk-adjusted metrics and their precise meaning, correct
+            annualization, professional tearsheets, cost sensitivity, walk-forward
+            out-of-sample testing, and the overfitting/multiple-testing traps.
+            Now we bring in machine learning — carefully — with scikit-learn.
           </p>
         </div>
 

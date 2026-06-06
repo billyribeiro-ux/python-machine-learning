@@ -14,40 +14,165 @@
 
         <p class="eyebrow">Module 8 · Indicators</p>
         <h1>Numba: Path-Dependent Speed</h1>
-        <p class="lead">Some indicators are inherently sequential — Supertrend, trailing stops, parabolic SAR — where each bar depends on the last. Numba JIT-compiles these Python loops to C speed, beating even clever vectorization.</p>
+        <p class="lead">
+          Some indicators are inherently sequential — Supertrend, trailing stops,
+          parabolic SAR — where each bar depends on the previous bar's
+          <em>output</em>. You can't vectorize them away. Numba JIT-compiles the
+          honest loop to machine code, giving you C speed without leaving Python.
+        </p>
         <div class="progress-pill" data-progress></div>
 
-        <div class="callout tryit">
-          <div class="callout-title">🚧 Full lesson in progress</div>
+        <h2>1. When vectorization loses</h2>
+        <p>
+          Module 1 preached: delete your loops. That's right for the vast
+          majority of indicators, where each output depends only on a fixed
+          window of <em>inputs</em>. But a minority depend on prior
+          <em>outputs</em>: a trailing stop's level today is "the higher of its
+          level yesterday and a new candidate." There's no closed-form array
+          expression for that without O(n²) tricks — the honest implementation is
+          a loop. The skill is recognizing which regime you're in and not
+          contorting a recurrence into a slow, "clever" vectorized form.
+        </p>
+        <div class="callout concept">
+          <div class="callout-title">🎯 Two kinds of indicators</div>
           <p>
-            The course is being written module-by-module for maximum depth. This
-            lesson's detailed outline is below so you can see exactly what it will
-            cover — and the underlying <code>quantlab</code> package code it builds
-            on already exists and is tested. Modules 0–4 are complete and runnable;
-            work through those first.
+            <strong>Window-dependent</strong> (SMA, RSI, z-score): output[t] =
+            f(input[t-w:t]). → Vectorize (Module 1/3).<br>
+            <strong>Path-dependent</strong> (Supertrend, trailing stops, SAR):
+            output[t] = f(input[t], output[t-1]). → Loop, then JIT with Numba.
           </p>
         </div>
 
-        <h2>What this lesson will cover</h2>
-                <h3>When vectorization loses</h3>
-        <p>Path-dependent recurrences can't be expressed as a single array op without O(n^2) tricks. The honest answer is a loop — just a fast one.</p>
-        <h3>@njit, nopython, and the type system</h3>
-        <p>Writing Numba-friendly code: typed arrays in/out, no Python objects, why the first call is slow (compilation) and the rest are C-fast.</p>
-        <h3>Building Supertrend & a trailing-stop ATR</h3>
-        <p>A real path-dependent indicator from scratch, JIT-compiled, validated against a slow reference.</p>
-        <h3>parallel=True and guvectorize</h3>
-        <p>Parallelizing across symbols with prange, and writing generalized ufuncs that broadcast like NumPy.</p>
-        <h3>Plugging Numba indicators into the registry</h3>
-        <p>Numba-backed compute() behind the Module 7 interface, so callers never know it's compiled.</p>
+        <h2>2. Numba in one minute</h2>
+        <p>
+          Decorate a function with <code>@njit</code> ("no-python JIT"). On first
+          call, Numba compiles it to native code specialized to your argument
+          types; every call after is C-fast. The rules: pass NumPy arrays and
+          scalars (no Python objects/lists), and keep the body to plain numeric
+          loops and math. The first call pays a one-time compilation cost.
+        </p>
+        <div class="code-block" data-filename="numba_intro.py">
+<textarea class="src">from numba import njit
+import numpy as np
+
+@njit(cache=True)              # cache=True persists the compiled code to disk
+def rolling_max_loop(x, w):
+    n = x.shape[0]
+    out = np.full(n, np.nan)
+    for i in range(w - 1, n):
+        m = x[i]
+        for j in range(i - w + 1, i):
+            if x[j] > m:
+                m = x[j]
+        out[i] = m
+    return out
+
+x = np.random.random(1_000_000)
+_ = rolling_max_loop(x, 20)    # first call: compiles (slow)
+%timeit rolling_max_loop(x, 20)  # subsequent: C speed   (in IPython)</textarea>
+        </div>
+
+        <h2>3. Build Supertrend from scratch</h2>
+        <p>
+          Supertrend is an ATR-banded trailing trend filter. The bands
+          <em>ratchet</em> — the lower band can only rise while in an uptrend,
+          the upper band can only fall in a downtrend — and a close crossing the
+          active band flips the regime. Each bar depends on the previous bar's
+          band and direction, so it's a textbook path-dependent loop. Ours lives
+          in <code>quantlab/indicators/numba_indicators.py</code> and degrades to
+          pure Python if Numba isn't installed.
+        </p>
+        <div class="code-block" data-filename="code/m8_numba.py">
+<textarea class="src">"""Module 8 — Numba path-dependent indicators (Supertrend) + a speed demo."""
+import time
+import numpy as np
+from quantlab.data import get_provider
+from quantlab.indicators import chandelier_long_stop, supertrend
+from quantlab.indicators.numba_indicators import HAS_NUMBA
+
+df = get_provider("yahoo").get_ohlcv("NVDA", start="2018-01-01")
+h, l, c = df["high"].to_numpy(), df["low"].to_numpy(), df["close"].to_numpy()
+
+print("Numba available:", HAS_NUMBA, "(without it, same code runs in pure Python)")
+
+# Supertrend: direction flips (+1<->-1) are entry/exit signals.
+st_line, direction = supertrend(h, l, c, period=10, multiplier=3.0)
+flips = int((direction[1:] != direction[:-1]).sum())
+print(f"Supertrend last={st_line[-1]:.2f} dir={int(direction[-1])} flips={flips}")
+
+# Chandelier exit: a long trailing stop that only ratchets UP.
+stop = chandelier_long_stop(h, l, c, period=22, multiplier=3.0)
+print(f"Chandelier long stop (latest): {stop[-1]:.2f}  (price {c[-1]:.2f})")
+
+t0 = time.perf_counter(); supertrend(h, l, c); t1 = time.perf_counter()
+supertrend(h, l, c); t2 = time.perf_counter()
+print(f"First call (incl compile): {(t1-t0)*1000:.1f} ms")
+print(f"Second call (compiled):    {(t2-t1)*1000:.3f} ms")</textarea>
+        </div>
+
+        <h2>4. Turn it into a strategy signal</h2>
+        <p>
+          A Supertrend direction flip from -1 to +1 is a long entry; +1 to -1 is
+          an exit. Because our backtest engine applies the one-bar execution
+          delay, you can hand the raw direction straight to it.
+        </p>
+        <div class="code-block" data-filename="supertrend_signal.py">
+<textarea class="src">import pandas as pd
+from quantlab.data import get_provider
+from quantlab.indicators import supertrend
+from quantlab.backtest import backtest_signal
+
+df = get_provider("yahoo").get_ohlcv("NVDA", start="2015-01-01")
+_, direction = supertrend(df["high"], df["low"], df["close"], 10, 3.0)
+
+# Long when the trend is up (direction == +1), flat otherwise.
+signal = pd.Series((direction > 0).astype(float), index=df.index)
+res = backtest_signal(df["close"], signal, fee_bps=2.0)
+print({k: round(v, 3) for k, v in res["stats"].items() if isinstance(v, float)})</textarea>
+        </div>
+
+        <div class="callout deepdive">
+          <div class="callout-title">🔬 parallel=True and guvectorize</div>
+          <p>
+            Two more Numba tools for scale: <code>@njit(parallel=True)</code> with
+            <code>numba.prange</code> spreads a loop across CPU cores (ideal for
+            running a path-dependent indicator over thousands of symbols
+            independently); and <code>@guvectorize</code> builds a generalized
+            ufunc that broadcasts like a native NumPy operation. Reach for these
+            when one symbol at C-speed still isn't enough and you need the whole
+            universe in parallel.
+          </p>
+        </div>
 
         <div class="callout better">
-          <div class="callout-title">🧱 Already in the repo</div>
+          <div class="callout-title">🧱 Graceful degradation by design</div>
           <p>
-            The reusable building blocks for this module live in the
-            <code>quantlab/</code> package (data layer, indicators, backtest +
-            stats engine, strategy combiner) and are exercised by the
-            <code>tests/</code> suite. The lesson narration will show you how they
-            were built and how to extend them.
+            Our module defines a <code>maybe_njit</code> shim: if Numba is
+            installed it's the real <code>@njit</code>; if not, it's a no-op and
+            the identical code runs in pure Python (slower, but correct). So the
+            library is <em>fast where it can be and works everywhere</em> — a
+            production-minded default that most indicator libraries skip.
+          </p>
+        </div>
+
+        <div class="callout tryit">
+          <div class="callout-title">🛠️ Try it</div>
+          <p>
+            Write a Numba <code>parabolic_sar(high, low, af=0.02, max_af=0.2)</code>
+            — another path-dependent classic where the acceleration factor steps
+            up on each new extreme. Validate it against a slow pure-Python
+            reference on 1,000 bars (they must match exactly), then time both. The
+            speedup is your reward for understanding when the loop is unavoidable.
+          </p>
+        </div>
+
+        <div class="callout concept">
+          <div class="callout-title">✅ You now master</div>
+          <p>
+            The window-vs-path-dependent distinction, <code>@njit</code> and its
+            rules, building Supertrend and a chandelier trailing stop from
+            scratch, JIT speedups, parallelization, and graceful degradation.
+            Next we scale backtesting itself: <strong>vectorbt</strong>.
           </p>
         </div>
 

@@ -14,40 +14,131 @@
 
         <p class="eyebrow">Module 14 · Putting It Together</p>
         <h1>Multi-Symbol Scanners</h1>
-        <p class="lead">Combine the data lake, Polars, and the indicator library into fast scanners that rank a universe for day-trading and swing setups.</p>
+        <p class="lead">
+          A scanner is the tool you open every morning: point it at a universe and
+          it ranks the names matching your setup. We combine the data layer, the
+          indicator library, and cross-sectional ranking into reusable scanners
+          for swing and day-trade setups — the same code, any timeframe.
+        </p>
         <div class="progress-pill" data-progress></div>
 
-        <div class="callout tryit">
-          <div class="callout-title">🚧 Full lesson in progress</div>
+        <h2>1. Scanner architecture</h2>
+        <p>
+          The pipeline is always the same: <strong>pull</strong> a tidy
+          multi-symbol panel through the provider →
+          <strong>compute</strong> per-symbol indicators (grouped, so AAPL never
+          bleeds into MSFT — the Module 2/3 rule) → take the
+          <strong>latest</strong> row per symbol → apply a <strong>filter</strong>
+          (the setup) and a <strong>ranking</strong>. Our
+          <code>quantlab/scanners/scanner.py</code> implements exactly this, with
+          named, composable setups.
+        </p>
+        <div class="code-block" data-filename="scanner_anatomy.py">
+<textarea class="src"># The shape of quantlab/scanners/scanner.py
+def latest_snapshot(provider, symbols, start, timeframe="1d"):
+    panel = provider.get_ohlcv_multi(symbols, start=start, timeframe=timeframe)
+    feats = _per_symbol_features(panel)        # grouped indicators, no leakage
+    return feats.groupby("symbol").tail(1)     # one row per symbol = the snapshot
+
+def scan(provider, symbols, setup, rank_by="mom20", ascending=False, ...):
+    snap = latest_snapshot(provider, symbols, ...)
+    hits = snap[setup(snap)]                    # setup() returns a boolean mask
+    return hits.sort_values(rank_by, ascending=ascending)</textarea>
+        </div>
+
+        <h2>2. Setups as composable predicates</h2>
+        <p>
+          A "setup" is just a function from the snapshot to a boolean mask, so
+          they compose with <code>&amp;</code> / <code>|</code>. Two built-ins:
+          <code>swing_pullback</code> (uptrend, RSI cooled to 40–55, liquid) and
+          <code>momentum_breakout</code> (stretched above the mean, strongly
+          trending). Both require minimum dollar volume — never scan into
+          illiquid names you can't actually trade.
+        </p>
+        <div class="code-block" data-filename="setups.py">
+<textarea class="src">def swing_pullback(snap, min_dollar_vol=5e7):
+    return ((snap["close"] > snap["sma200"])      # long-term uptrend
+            & (snap["sma20"] > snap["sma50"])     # short-term uptrend
+            & (snap["rsi14"].between(40, 55))      # a dip, not a breakdown
+            & (snap["dollar_vol"] > min_dollar_vol))
+
+def momentum_breakout(snap, min_dollar_vol=5e7):
+    return ((snap["sma20"] > snap["sma50"])
+            & (snap["z20"] > 1.0)                  # stretched above the mean
+            & (snap["mom60"] > 0.10)               # strong 3-month momentum
+            & (snap["dollar_vol"] > min_dollar_vol))</textarea>
+        </div>
+
+        <h2>3. Runnable: scan a universe</h2>
+        <div class="code-block" data-filename="code/m14_scanners.py">
+<textarea class="src">"""Module 14 — multi-symbol scanners for swing & momentum setups."""
+from quantlab.data import get_provider
+from quantlab.scanners import scan, swing_pullback, momentum_breakout
+
+provider = get_provider("yahoo")
+universe = ["SPY","QQQ","AAPL","MSFT","NVDA","AMZN","META","GOOGL",
+            "JPM","XOM","WMT","KO","TSLA","AVGO","COST","HD","PG","UNH"]
+
+print("=== Swing pullbacks (uptrend, RSI 40-55, liquid) ===")
+sw = scan(provider, universe, setup=swing_pullback, rank_by="mom20", start="2022-01-01")
+print(sw.round(3).to_string() if len(sw) else "  (no matches in current regime)")
+
+print("\n=== Momentum breakouts (stretched & trending) ===")
+mo = scan(provider, universe, setup=momentum_breakout, rank_by="mom60", start="2022-01-01")
+print(mo.round(3).to_string() if len(mo) else "  (no matches in current regime)")</textarea>
+        </div>
+
+        <h2>4. Cross-sectional ranking</h2>
+        <p>
+          Filtering tells you <em>which</em> names qualify; ranking tells you
+          <em>which first</em>. For a fair comparison across very different stocks,
+          rank on scale-free quantities (momentum %, z-score, relative strength
+          vs SPY) rather than raw price or dollar moves. For a true
+          cross-sectional score, z-score each feature <em>across the universe</em>
+          on the snapshot day, then sum — so "top 10" means comparably strong on
+          every dimension.
+        </p>
+        <div class="callout deepdive">
+          <div class="callout-title">🔬 Scanners ride the data lake</div>
           <p>
-            The course is being written module-by-module for maximum depth. This
-            lesson's detailed outline is below so you can see exactly what it will
-            cover — and the underlying <code>quantlab</code> package code it builds
-            on already exists and is tested. Modules 0–4 are complete and runnable;
-            work through those first.
+            For large universes, don't re-download every run — scan over the
+            DuckDB data lake from Module 4. The per-symbol window indicators can
+            even be computed in SQL (<code>OVER (PARTITION BY symbol ...)</code>)
+            or in Polars with <code>.over("symbol")</code> for a parallel pass.
+            The scanner logic is identical; only the data source changes — the
+            payoff of building on the data foundation.
           </p>
         </div>
 
-        <h2>What this lesson will cover</h2>
-                <h3>Scanner architecture</h3>
-        <p>DuckDB lake -> Polars .over('symbol') indicators -> ranking/filtering -> alerts. Build on code/m4_windows_sql.py.</p>
-        <h3>Swing-trade scans</h3>
-        <p>Pullbacks-in-uptrend, breakouts, relative strength vs SPY (extending the Module 4 RS join).</p>
-        <h3>Intraday/day-trade scans</h3>
-        <p>Gap-ups, opening-range breakouts, VWAP reclaims on 1m/5m bars; the data-provider intraday limits and how to handle them.</p>
-        <h3>Ranking & cross-sectional normalization</h3>
-        <p>Z-scoring features across the universe so 'top 20' means something comparable.</p>
-        <h3>Alerting & scheduling</h3>
-        <p>Turning a scan into a repeatable job that writes results and notifies you.</p>
+        <h2>5. Intraday / day-trade scanning</h2>
+        <p>
+          The same scanner becomes a day-trade tool by switching the timeframe:
+          <code>scan(provider, universe, timeframe="5m", start=...)</code>. Then
+          write intraday setups — opening-range breakouts, VWAP reclaims, gap-ups
+          — as new predicates. (Yahoo serves only ~60 days of intraday data, and
+          for serious day trading you'd plug in a real-time provider behind the
+          same interface — one of the reasons we built the data layer the way we
+          did.)
+        </p>
 
-        <div class="callout better">
-          <div class="callout-title">🧱 Already in the repo</div>
+        <div class="callout tryit">
+          <div class="callout-title">🛠️ Try it</div>
           <p>
-            The reusable building blocks for this module live in the
-            <code>quantlab/</code> package (data layer, indicators, backtest +
-            stats engine, strategy combiner) and are exercised by the
-            <code>tests/</code> suite. The lesson narration will show you how they
-            were built and how to extend them.
+            Add a <code>relative_strength</code> setup that flags names whose
+            ratio to SPY is making a new 60-day high (join each symbol's close to
+            SPY's, as in Module 4's SQL). Combine it with
+            <code>swing_pullback</code> using <code>&amp;</code> to get
+            "strong-vs-market pullbacks" — a classic, high-quality swing screen.
+          </p>
+        </div>
+
+        <div class="callout concept">
+          <div class="callout-title">✅ You now master</div>
+          <p>
+            The scan pipeline, composable setup predicates, leak-free per-symbol
+            features, cross-sectional ranking, scanning over the data lake, and
+            switching to intraday for day trading. Next we add an asset class:
+            options.
           </p>
         </div>
 

@@ -14,40 +14,138 @@
 
         <p class="eyebrow">Module 13 · Machine Learning</p>
         <h1>Optuna: Optimize Everything</h1>
-        <p class="lead">One optimizer for both worlds: tune indicator/strategy settings AND ML hyperparameters, with pruning, multi-objective trade-offs, and persisted studies.</p>
+        <p class="lead">
+          One optimizer for both worlds: tune indicator/strategy settings
+          <em>and</em> ML hyperparameters. We optimize what actually matters —
+          backtested performance — with smart sampling, pruning, and
+          multi-objective trade-offs, while guarding against the overfitting that
+          optimization makes dangerously easy.
+        </p>
         <div class="progress-pill" data-progress></div>
 
-        <div class="callout tryit">
-          <div class="callout-title">🚧 Full lesson in progress</div>
+        <h2>1. The study / trial model</h2>
+        <p>
+          Optuna's abstraction is simple and powerful: you write an
+          <code>objective(trial)</code> that <em>suggests</em> parameter values
+          and returns a score; Optuna runs many trials, learning where good
+          regions are. Because the objective is just Python, it can build a
+          strategy, backtest it, and return its Sharpe — so you optimize
+          <em>real performance</em>, not a proxy like validation accuracy.
+        </p>
+        <div class="code-block" data-filename="optuna_objective.py">
+<textarea class="src"># The essence of quantlab/ml/optimize.py :: optimize_combo
+import optuna
+from quantlab.strategies import ComboParams, run_combo
+
+def make_objective(close):
+    def objective(trial):
+        fast = trial.suggest_int("fast", 5, 50)
+        slow = trial.suggest_int("slow", 60, 250)
+        rsi_floor = trial.suggest_float("rsi_floor", 30, 55)
+        z_entry = trial.suggest_float("z_entry", -1.0, 1.5)
+        if fast >= slow:               # invalid trend pair -> prune the trial
+            raise optuna.TrialPruned()
+        p = ComboParams(fast=fast, slow=slow, rsi_floor=rsi_floor, z_entry=z_entry)
+        return run_combo(close, p)["stats"]["sharpe"]
+    return objective</textarea>
+        </div>
+
+        <h2>2. Runnable: single- and multi-objective optimization</h2>
+        <div class="code-block" data-filename="code/m13_optuna.py">
+<textarea class="src">"""Module 13 — Optuna: optimize strategy settings (single + multi-objective)."""
+from quantlab.data import get_provider
+from quantlab.ml.optimize import optimize_combo, optimize_combo_multiobjective
+
+close = get_provider("yahoo").get_ohlcv("SPY", start="2010-01-01")["close"]
+
+# 1) Single-objective: maximize Sharpe (TPE sampler learns good regions).
+study = optimize_combo(close, n_trials=60)
+print("Best Sharpe:", round(study.best_value, 3))
+print("Best params:", {k: round(v, 3) if isinstance(v, float) else v
+                       for k, v in study.best_params.items()})
+
+# 2) Multi-objective: maximize Sharpe AND minimize |drawdown| -> Pareto front.
+mstudy = optimize_combo_multiobjective(close, n_trials=80)
+print("\nPareto front (top 5 by Sharpe):")
+for t in sorted(mstudy.best_trials, key=lambda t: -t.values[0])[:5]:
+    print(f"  sharpe={t.values[0]:.3f}  maxDD={t.values[1]:.3f}  "
+          f"fast={t.params['fast']} slow={t.params['slow']}")</textarea>
+        </div>
+        <p class="output-label">Expected output (shape)</p>
+        <div class="output">Best Sharpe: 0.682
+Best params: {'fast': 30, 'slow': 182, 'rsi_floor': 40.097, 'z_entry': 0.089}
+
+Pareto front (top 5 by Sharpe):
+  sharpe=0.697  maxDD=0.117  fast=5 slow=105
+  sharpe=0.331  maxDD=0.024  fast=10 slow=124
+  ...</div>
+
+        <h2>3. Samplers &amp; pruning</h2>
+        <p>
+          The default <strong>TPE</strong> sampler models the distribution of
+          good vs bad parameters and focuses sampling on promising regions —
+          much faster than grid or random search for the same quality.
+          <strong>Pruning</strong> abandons hopeless trials early (we use
+          <code>TrialPruned</code> to reject invalid fast≥slow combos instantly;
+          for ML you'd prune trials whose intermediate validation score is poor).
+          Together they let you search a large space cheaply.
+        </p>
+
+        <h2>4. Multi-objective: there is no single "best"</h2>
+        <p>
+          Return and drawdown trade off. Maximizing only Sharpe might pick a
+          strategy you couldn't stomach. Multi-objective optimization returns a
+          <strong>Pareto front</strong>: the set of configurations where you
+          can't improve one objective without worsening the other. <em>Picking</em>
+          from the front is a judgement call about your risk tolerance — exactly
+          right, because optimization should inform decisions, not pretend to make
+          them.
+        </p>
+        <div class="callout deepdive">
+          <div class="callout-title">🔬 Optimize ML hyperparameters too</div>
           <p>
-            The course is being written module-by-module for maximum depth. This
-            lesson's detailed outline is below so you can see exactly what it will
-            cover — and the underlying <code>quantlab</code> package code it builds
-            on already exists and is tested. Modules 0–4 are complete and runnable;
-            work through those first.
+            The same machinery tunes model hyperparameters. An objective can
+            <code>suggest</code> XGBoost's <code>max_depth</code>,
+            <code>learning_rate</code>, and <code>subsample</code>, train with our
+            time-ordered split, and return the <em>backtested</em> Sharpe of the
+            resulting signal — so the model is optimized for trading PnL, not
+            log-loss. One optimizer, both the strategy layer and the model layer.
           </p>
         </div>
 
-        <h2>What this lesson will cover</h2>
-                <h3>The study/trial model</h3>
-        <p>Define an objective(trial) that builds params and returns a score (e.g. walk-forward Sharpe). Reuse ComboParams as the search space.</p>
-        <h3>Samplers & pruning</h3>
-        <p>TPE sampling, median pruning to kill bad trials early, and why random search is a strong baseline.</p>
-        <h3>Multi-objective optimization</h3>
-        <p>Maximize return AND minimize drawdown simultaneously; reading the Pareto front instead of one 'best'.</p>
-        <h3>Optimizing strategy settings</h3>
-        <p>Sweep the combo strategy's fast/slow/RSI/z thresholds — the principled version of the Module 9 grid.</p>
-        <h3>Persistence & overfitting guards</h3>
-        <p>SQLite-backed studies for resumability, and validating the chosen params truly out-of-sample.</p>
-
-        <div class="callout better">
-          <div class="callout-title">🧱 Already in the repo</div>
+        <div class="callout pitfall">
+          <div class="callout-title">⚠️ Optimization is overfitting with extra steps</div>
           <p>
-            The reusable building blocks for this module live in the
-            <code>quantlab/</code> package (data layer, indicators, backtest +
-            stats engine, strategy combiner) and are exercised by the
-            <code>tests/</code> suite. The lesson narration will show you how they
-            were built and how to extend them.
+            The more trials you run, the more the "best" result is fitted to noise
+            in your backtest window. Three defenses: (1) optimize on a training
+            period and confirm on a held-out one (walk-forward, Module 10); (2)
+            prefer broad, stable regions of the Pareto front over razor-thin
+            peaks; (3) keep the parameter space small and meaningful. Persist the
+            study (<code>storage="sqlite:///study.db"</code>) so you can audit how
+            many trials you really ran — that count feeds the deflated-Sharpe
+            reality check.
+          </p>
+        </div>
+
+        <div class="callout tryit">
+          <div class="callout-title">🛠️ Try it</div>
+          <p>
+            Split SPY into 2010–2018 (train) and 2019–today (test). Run
+            <code>optimize_combo</code> on the train slice, then evaluate
+            <code>run_combo(test_close, ComboParams(**study.best_params))</code>
+            on the untouched test slice. Compare in-sample vs out-of-sample
+            Sharpe — the gap is your overfitting tax, and seeing it is the lesson.
+          </p>
+        </div>
+
+        <div class="callout concept">
+          <div class="callout-title">✅ You now master</div>
+          <p>
+            The study/trial model, optimizing real backtested performance, TPE
+            sampling and pruning, multi-objective Pareto fronts, tuning both
+            strategy and model parameters, and the discipline that keeps
+            optimization from fooling you. Now we assemble everything into
+            scanners.
           </p>
         </div>
 

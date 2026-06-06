@@ -46,15 +46,23 @@ python -m http.server 8000
 
 ## Running the examples
 
-Each lesson's key example is mirrored as a runnable script in `code/`:
+Every lesson's key example is mirrored as a runnable script in `code/` (one per
+module, `m0`–`m15`):
 
 ```bash
-python code/m0_hello_data.py      # pull + sanity-check data through the provider
-python code/m1_indicators.py      # from-scratch indicators, proven vs pandas
-python code/m2_features.py        # leak-free ML feature frame
-python code/m3_multisymbol.py     # per-symbol indicators in one Polars pass
-python code/m4_build_lake.py      # build the DuckDB/parquet data lake
-python code/m4_windows_sql.py     # per-symbol indicators via SQL window functions
+python code/m1_indicators.py   # from-scratch indicators, proven vs pandas
+python code/m4_build_lake.py   # build the DuckDB/parquet data lake
+python code/m5_talib.py        # TA-Lib via the adapter, validated vs ours
+python code/m7_registry.py     # combine indicators by name + settings
+python code/m8_numba.py        # Supertrend / trailing stops (path-dependent)
+python code/m9_vectorbt.py     # parameter sweeps -> stats grid
+python code/m10_quantstats.py  # stats bundle + a full HTML tearsheet
+python code/m11_sklearn.py     # leak-free ML: triple-barrier + purged CV
+python code/m12_boosting.py    # XGBoost/LightGBM -> backtested signal
+python code/m13_optuna.py      # optimize strategy settings (single + Pareto)
+python code/m14_scanners.py    # multi-symbol swing/momentum scanners
+python code/m15_options.py     # Black-Scholes, Greeks, implied vol
+streamlit run app/streamlit_app.py   # the interactive dashboard (Module 16)
 ```
 
 If you didn't run `pip install -e .`, prefix with the repo root on the path:
@@ -105,12 +113,16 @@ lessons/                # one HTML lesson per module (Modules 0–4 complete)
 assets/                 # shared CSS + JS (Monaco, sidebar, prev/next, progress)
 quantlab/               # the reusable package the course builds
   data/                 #   provider-agnostic data layer + DuckDB data lake
-  indicators/           #   from-scratch NumPy indicators
-  backtest/             #   leak-free engine + performance stats
+  indicators/           #   NumPy + TA-Lib adapter + Numba + a unified registry
+  backtest/             #   leak-free engine, stats, vectorbt + QuantStats bridges
   strategies/           #   multi-indicator combo strategy (custom settings)
+  ml/                   #   features, triple-barrier labels, purged CV, models, optuna
+  options/              #   Black-Scholes pricing, Greeks, implied vol
+  scanners/             #   multi-symbol swing/momentum scanners
   utils/                #   returns / log-returns / forward returns
+app/streamlit_app.py    # the interactive dashboard (Module 16)
 code/                   # runnable scripts mirroring each lesson's key example
-tests/                  # pytest: contract + indicators + capstone stats
+tests/                  # pytest: contract, indicators, options, properties, capstone
 requirements.txt        # full course deps   |   pyproject.toml: package + extras
 ```
 
@@ -118,9 +130,13 @@ requirements.txt        # full course deps   |   pyproject.toml: package + extra
 
 ## Course status
 
-Modules **0–4** (Setup, NumPy, pandas, Polars, DuckDB) are fully written and
-runnable. Modules **5–17** (TA-Lib, pandas-ta, custom indicator library, Numba,
+**All 18 modules (0–17) are complete, written, and runnable** — Setup, NumPy,
+pandas, Polars, DuckDB, TA-Lib, pandas-ta, the unified indicator library, Numba,
 vectorbt, QuantStats, scikit-learn, XGBoost/LightGBM, Optuna, scanners, options,
-Streamlit, testing) are navigable with detailed outlines and are being filled in
-module-by-module; their underlying `quantlab` building blocks already exist and
-are tested.
+Streamlit, and testing. Every module has a narrated lesson, a runnable `code/`
+script (or the Streamlit app), and supporting tested code in `quantlab/`.
+
+> Note on `pandas-ta`: it currently publishes wheels only for Python ≥ 3.12, so
+> on 3.11 it may not install. Module 6 demonstrates its API and falls back to the
+> QuantLab registry to compute the same indicators, so the lesson works either
+> way.

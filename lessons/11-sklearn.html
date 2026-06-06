@@ -14,40 +14,155 @@
 
         <p class="eyebrow">Module 11 · Machine Learning</p>
         <h1>scikit-learn for Trading</h1>
-        <p class="lead">Apply ML to markets without fooling yourself: features from indicators, proper labeling, and time-series cross-validation that doesn't leak the future.</p>
+        <p class="lead">
+          Applying ML to markets is mostly about <em>not fooling yourself</em>.
+          We build leak-free features, label outcomes the smart way
+          (triple-barrier), and validate with purged, embargoed cross-validation —
+          the practices that separate honest research from data-snooping.
+        </p>
         <div class="progress-pill" data-progress></div>
 
-        <div class="callout tryit">
-          <div class="callout-title">🚧 Full lesson in progress</div>
+        <h2>1. Features: reuse the registry, scale-free</h2>
+        <p>
+          Our <code>quantlab.ml.make_features</code> builds the feature matrix
+          from the Module 7 registry, so features are declared as
+          <code>(name, settings)</code> specs. Level-like features (SMA, ATR) are
+          expressed as ratios to close so a $500 stock and a $20 stock become
+          directly comparable — essential when a model trains across symbols and
+          regimes.
+        </p>
+        <div class="code-block" data-filename="ml_features.py">
+<textarea class="src">from quantlab.data import get_provider
+from quantlab.ml import make_features, DEFAULT_FEATURES
+
+df = get_provider("yahoo").get_ohlcv("SPY", start="2010-01-01")
+X = make_features(df, DEFAULT_FEATURES)   # ret/rsi/zscore/atr/sma/std, normalized
+print(X.columns.tolist())
+print(X.tail(2).round(4))</textarea>
+        </div>
+
+        <h2>2. Labeling: triple-barrier beats "did it go up?"</h2>
+        <p>
+          Naive labels ("up over the next 5 days?") ignore the <em>path</em>: a
+          trade that craters 8% then closes +0.1% gets the same label as a smooth
+          grind up — yet you'd have been stopped out of the first. The
+          <strong>triple-barrier</strong> method labels each bar by the first of
+          three barriers it touches: an upper (profit-take), a lower
+          (stop-loss), or a vertical (time-out). Barriers are sized in volatility
+          units so they adapt to regime.
+        </p>
+        <div class="code-block" data-filename="triple_barrier.py">
+<textarea class="src">from quantlab.data import get_provider
+from quantlab.ml import triple_barrier_labels, binary_labels
+
+close = get_provider("yahoo").get_ohlcv("SPY", start="2010-01-01")["close"]
+
+tb = triple_barrier_labels(close, horizon=10, upper=2.0, lower=2.0, vol_window=20)
+print(tb["label"].value_counts(dropna=False))   # +1 / -1 / 0 / NaN(tail)
+print(tb.tail(12).round(4))   # last rows are NaN: their outcome isn't known yet
+
+# Contrast with the naive label to feel the difference downstream.
+naive = binary_labels(close, horizon=5)</textarea>
+        </div>
+        <div class="callout deepdive">
+          <div class="callout-title">🔬 Why volatility-scaled barriers</div>
           <p>
-            The course is being written module-by-module for maximum depth. This
-            lesson's detailed outline is below so you can see exactly what it will
-            cover — and the underlying <code>quantlab</code> package code it builds
-            on already exists and is tested. Modules 0–4 are complete and runnable;
-            work through those first.
+            A fixed ±3% barrier is trivially hit in a volatile week and never hit
+            in a calm one — so a fixed barrier secretly encodes the volatility
+            regime into your labels. Sizing barriers as ±k·σ (σ = recent return
+            volatility) makes "+2 sigma move" mean the same difficulty in every
+            regime. Adaptive labels → a model that learns signal, not volatility.
           </p>
         </div>
 
-        <h2>What this lesson will cover</h2>
-                <h3>Features & the leak-free frame</h3>
-        <p>Reuse the Module 2 feature template (quantlab.utils.forward_returns) to build X and a labeled y with no look-ahead.</p>
-        <h3>Triple-barrier labeling</h3>
-        <p>Lopez de Prado's method: label by which of {profit-take, stop-loss, time-out} is hit first — far better than naive forward-return signs.</p>
-        <h3>Pipelines & preprocessing</h3>
-        <p>StandardScaler + model in a Pipeline so scaling is fit only on training folds (a subtle but critical leak source).</p>
-        <h3>Purged & embargoed K-fold</h3>
-        <p>Why plain KFold leaks in time series, and how purging/embargo fixes it.</p>
-        <h3>Evaluating a trading model</h3>
-        <p>Classification metrics vs actual backtested PnL — accuracy is not edge.</p>
+        <h2>3. The leak you can't see: train/test contamination</h2>
+        <p>
+          Two subtle leaks plague time-series ML. First, <strong>preprocessing
+          leakage</strong>: fitting a scaler on all data lets test-set statistics
+          bleed into training. The fix is a <code>Pipeline</code>, so scaling is
+          fit only on each training fold. Second, <strong>label-overlap
+          leakage</strong>: a triple-barrier label at <em>t</em> peeks up to
+          <em>t+horizon</em>, which may land inside the test fold — so we
+          <em>purge</em> overlapping training samples and <em>embargo</em> the
+          ones right after the test fold.
+        </p>
+        <div class="code-block" data-filename="purged_cv.py">
+<textarea class="src"># quantlab.ml.PurgedKFold: scikit-learn-compatible, leak-aware splits.
+from quantlab.ml import PurgedKFold
 
-        <div class="callout better">
-          <div class="callout-title">🧱 Already in the repo</div>
+pk = PurgedKFold(n_splits=5, embargo=0.01, label_horizon=10)
+for tr, te in pk.split(X):
+    print("train:", len(tr), "test:", len(te))
+# Train folds are SMALLER than plain KFold — that's the purge+embargo removing
+# samples whose labels overlap or are autocorrelated with the test period.</textarea>
+        </div>
+
+        <h2>4. Runnable: an honest end-to-end pipeline</h2>
+        <div class="code-block" data-filename="code/m11_sklearn.py">
+<textarea class="src">"""Module 11 — leak-free ML: features, triple-barrier labels, purged CV."""
+import numpy as np
+from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import roc_auc_score
+
+from quantlab.data import get_provider
+from quantlab.ml import assemble_dataset, triple_barrier_labels, PurgedKFold
+
+df = get_provider("yahoo").get_ohlcv("SPY", start="2010-01-01")
+close = df["close"]
+
+lab = triple_barrier_labels(close, horizon=10, upper=2.0, lower=2.0)
+y = (lab["label"] > 0).astype(float).where(lab["label"].notna())
+X, y = assemble_dataset(df, y)          # joins features+label, drops warmup/tail
+print("Dataset:", X.shape, "| positive rate:", f"{y.mean():.1%}")
+
+model = make_pipeline(StandardScaler(), LogisticRegression(max_iter=1000))
+pk = PurgedKFold(n_splits=5, embargo=0.01, label_horizon=10)
+
+aucs = []
+for tr, te in pk.split(X):
+    model.fit(X.iloc[tr], y.iloc[tr])
+    p = model.predict_proba(X.iloc[te])[:, 1]
+    if len(np.unique(y.iloc[te])) > 1:
+        aucs.append(roc_auc_score(y.iloc[te], p))
+print(f"Purged CV AUC: mean={np.mean(aucs):.3f}  folds={[round(a,3) for a in aucs]}")</textarea>
+        </div>
+        <p class="output-label">Expected output</p>
+        <div class="output">Dataset: (4072, 8) | positive rate: 46.3%
+Purged CV AUC: mean=0.545  folds=[0.582, 0.568, 0.523, 0.518, 0.536]</div>
+
+        <div class="callout pitfall">
+          <div class="callout-title">⚠️ AUC ≈ 0.5 is the honest baseline</div>
           <p>
-            The reusable building blocks for this module live in the
-            <code>quantlab/</code> package (data layer, indicators, backtest +
-            stats engine, strategy combiner) and are exercised by the
-            <code>tests/</code> suite. The lesson narration will show you how they
-            were built and how to extend them.
+            Markets are close to efficient; an AUC of 0.52–0.56 on liquid daily
+            data is a <em>realistic</em>, often-genuine edge — not a failure.
+            Beware any tutorial reporting 0.9 AUC on price prediction: it's almost
+            always leakage. The deliverable here is a pipeline that <em>won't lie
+            to you</em>, so that when you do find edge, you can trust it.
+          </p>
+        </div>
+
+        <div class="callout tryit">
+          <div class="callout-title">🛠️ Try it</div>
+          <p>
+            Swap the triple-barrier label for <code>binary_labels(close, 5)</code>
+            in <code>m11_sklearn.py</code> and re-run. Then convert the model's
+            held-out probabilities into a signal with
+            <code>proba_to_signal</code> and backtest it with
+            <code>backtest_signal</code>. Compare the two labeling schemes by
+            <em>backtested Sharpe</em>, not AUC — because PnL is the only metric
+            that pays.
+          </p>
+        </div>
+
+        <div class="callout concept">
+          <div class="callout-title">✅ You now master</div>
+          <p>
+            Scale-free feature construction, triple-barrier labeling, the two
+            time-series leaks and how Pipelines + PurgedKFold defeat them, and the
+            honest interpretation of AUC. Next we upgrade the model to
+            gradient-boosted trees.
           </p>
         </div>
 

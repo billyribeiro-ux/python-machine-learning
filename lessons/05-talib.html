@@ -14,40 +14,171 @@
 
         <p class="eyebrow">Module 5 · Indicators</p>
         <h1>TA-Lib Mastery</h1>
-        <p class="lead">TA-Lib wraps 150+ battle-tested C indicators. We learn to use them correctly — and to wrap them in our own engine so they obey the QuantLab contract.</p>
+        <p class="lead">
+          TA-Lib wraps 150+ battle-tested C indicators used across the industry.
+          We learn to call them correctly, navigate their sharp edges (NaN
+          warmup, input order, float-typed parameters), and — crucially — wrap
+          them in the QuantLab contract so they compose with everything else.
+        </p>
         <div class="progress-pill" data-progress></div>
 
-        <div class="callout tryit">
-          <div class="callout-title">🚧 Full lesson in progress</div>
+        <h2>1. What TA-Lib is, and why it has edges</h2>
+        <p>
+          TA-Lib is a C library with a thin Python binding. The C core is fast
+          and the definitions are canonical — when someone says "the" RSI or
+          ATR, they usually mean TA-Lib's. But the binding speaks raw NumPy
+          arrays, not DataFrames, and that surfaces three recurring gotchas:
+        </p>
+        <ul>
+          <li><strong>Warmup NaNs.</strong> Every indicator needs history; the
+            first <code>timeperiod</code> values come back NaN. Forgetting this
+            and feeding NaNs into a model or a comparison is the classic bug.</li>
+          <li><strong>Input contract.</strong> Inputs must be 1-D
+            <code>float64</code> arrays of equal length, and multi-input
+            functions (ATR needs high/low/close) expect them in a specific
+            order.</li>
+          <li><strong>Float-typed parameters.</strong> Some parameters
+            (<code>nbdevup</code> on Bollinger Bands) must be floats; passing an
+            <code>int</code> raises a cryptic type error.</li>
+        </ul>
+        <div class="callout pitfall">
+          <div class="callout-title">⚠️ Install first (Module 0)</div>
           <p>
-            The course is being written module-by-module for maximum depth. This
-            lesson's detailed outline is below so you can see exactly what it will
-            cover — and the underlying <code>quantlab</code> package code it builds
-            on already exists and is tested. Modules 0–4 are complete and runnable;
-            work through those first.
+            <code>pip install TA-Lib</code> needs the TA-Lib <em>C library</em>
+            present. The painless path is <code>conda install -c conda-forge
+            ta-lib</code>. Our wrapper raises a clear, actionable message if it's
+            missing, and our tests <code>importorskip</code> it — so the rest of
+            QuantLab works even without it.
           </p>
         </div>
 
-        <h2>What this lesson will cover</h2>
-                <h3>Why TA-Lib (and its one big gotcha)</h3>
-        <p>The C library is fast and canonical, but every function has a warmup period that returns NaN, and input order/length matters. We map the failure modes.</p>
-        <h3>The function families</h3>
-        <p>Overlap studies (SMA/EMA/BBANDS), momentum (RSI/MACD/STOCH/ADX), volume (OBV/AD), volatility (ATR/NATR), pattern recognition (candlesticks), and cycle indicators — with a copy-paste cheat-sheet for each.</p>
-        <h3>The abstract vs function API</h3>
-        <p>talib.RSI(close) vs talib.abstract.Function('RSI') — when the abstract API's introspection (inputs, parameters, output names) makes generic, settings-driven code possible.</p>
-        <h3>Wrapping TA-Lib in our engine</h3>
-        <p>Adapter functions that take our normalized OHLCV frame, call TA-Lib, and return aligned columns with honest NaN warmup — so TA-Lib indicators drop into the same pipeline as our NumPy ones.</p>
-        <h3>Validating against our from-scratch versions</h3>
-        <p>Cross-check talib.RSI/SMA/ATR against quantlab.indicators to build trust in BOTH implementations (this is exactly what tests/test_indicators.py already does for RSI and SMA).</p>
+        <h2>2. The two APIs: function vs abstract</h2>
+        <p>
+          TA-Lib offers a <strong>function API</strong> (<code>talib.RSI(close,
+          14)</code> — direct, explicit) and an <strong>abstract API</strong>
+          (<code>Function("RSI")</code> — introspectable: it can tell you which
+          inputs it needs and which outputs it produces). The abstract API is
+          what lets us write <em>one</em> generic wrapper instead of 150
+          hand-written ones — the key to settings-driven, config-file pipelines.
+        </p>
+        <div class="code-block" data-filename="talib_two_apis.py">
+<textarea class="src">import talib
+from talib import abstract
+import numpy as np
+
+close = np.random.random(100) * 100
+
+# Function API: direct and explicit.
+rsi = talib.RSI(close, timeperiod=14)
+
+# Abstract API: introspect inputs/outputs, then call generically.
+f = abstract.Function("MACD")
+print("MACD needs inputs :", f.input_names)     # {'price': 'close'}
+print("MACD outputs      :", f.output_names)    # ['macd','macdsignal','macdhist']
+print("MACD parameters   :", f.parameters)      # {'fastperiod':12, ...}</textarea>
+        </div>
+
+        <h2>3. The QuantLab TA-Lib adapter</h2>
+        <p>
+          Our adapter (<code>quantlab/indicators/talib_wrap.py</code>) takes our
+          normalized OHLCV frame, uses the abstract API to wire columns to
+          inputs automatically (it works because we already named our columns
+          <code>open/high/low/close/volume</code>), and returns aligned,
+          prefixed columns with honest NaN warmup. Now any TA-Lib indicator
+          drops into the same pipeline as our from-scratch ones.
+        </p>
+        <div class="code-block" data-filename="code/m5_talib.py">
+<textarea class="src">"""Module 5 — TA-Lib through the QuantLab adapter, validated against our own.
+
+Run:  python code/m5_talib.py
+"""
+import numpy as np
+from quantlab.data import get_provider
+from quantlab.indicators import rsi as our_rsi
+from quantlab.indicators.talib_wrap import add_indicators, list_functions, talib_func
+
+df = get_provider("yahoo").get_ohlcv("AAPL", start="2018-01-01")
+
+# Discover what's available, grouped by category.
+groups = list_functions()
+print("Momentum indicators:", groups["Momentum Indicators"][:8], "...")
+
+# Compute a basket of indicators with custom settings in one call. Note BBANDS'
+# nbdevup/nbdevdn are FLOATS (2.0, not 2) — a TA-Lib type requirement.
+feats = add_indicators(df, [
+    ("RSI",    {"timeperiod": 14}),
+    ("MACD",   {"fastperiod": 12, "slowperiod": 26, "signalperiod": 9}),
+    ("ATR",    {"timeperiod": 14}),
+    ("BBANDS", {"timeperiod": 20, "nbdevup": 2.0, "nbdevdn": 2.0}),
+])
+new_cols = [c for c in feats.columns if c not in df.columns]
+print("Added columns:", new_cols)
+print(feats[new_cols].tail(3).round(2))
+
+# Validate: TA-Lib's RSI should match our from-scratch RSI (after warmup).
+tl_rsi = talib_func("RSI", df, timeperiod=14)["RSI_real"].to_numpy()
+mine = our_rsi(df["close"].to_numpy(), 14)
+m = ~np.isnan(tl_rsi) & ~np.isnan(mine)
+print("Our RSI matches TA-Lib:",
+      np.allclose(tl_rsi[20:][m[20:]], mine[20:][m[20:]], atol=1e-6))</textarea>
+        </div>
+        <p class="output-label">Expected output (tail)</p>
+        <div class="output">Momentum indicators: ['ADX', 'ADXR', 'APO', 'AROON', 'AROONOSC', 'BOP', 'CCI', 'CMO'] ...
+Added columns: ['RSI_real', 'MACD_macd', ..., 'BBANDS_upperband', ...]
+Our RSI matches TA-Lib: True</div>
 
         <div class="callout better">
-          <div class="callout-title">🧱 Already in the repo</div>
+          <div class="callout-title">🧱 Why wrap, not call directly</div>
           <p>
-            The reusable building blocks for this module live in the
-            <code>quantlab/</code> package (data layer, indicators, backtest +
-            stats engine, strategy combiner) and are exercised by the
-            <code>tests/</code> suite. The lesson narration will show you how they
-            were built and how to extend them.
+            By routing TA-Lib through the adapter, a TA-Lib indicator and a
+            QuantLab indicator are <em>interchangeable</em>: same input frame,
+            same aligned output, same NaN-warmup discipline. Your scanners,
+            backtests, and ML features don't care which engine produced a column.
+            That uniformity is what makes a large codebase maintainable — and it
+            let us prove, in three lines, that our hand-written RSI matches the
+            industry standard.
+          </p>
+        </div>
+
+        <h2>4. The function families (a working map)</h2>
+        <table>
+          <tr><th>Category</th><th>Examples</th><th>Use</th></tr>
+          <tr><td>Overlap studies</td><td>SMA, EMA, WMA, BBANDS, SAR</td><td>trend / bands</td></tr>
+          <tr><td>Momentum</td><td>RSI, MACD, STOCH, ADX, CCI, MFI</td><td>strength / turns</td></tr>
+          <tr><td>Volume</td><td>OBV, AD, ADOSC</td><td>conviction</td></tr>
+          <tr><td>Volatility</td><td>ATR, NATR, TRANGE</td><td>sizing / stops</td></tr>
+          <tr><td>Pattern recognition</td><td>CDLENGULFING, CDLDOJI, …(60+)</td><td>candlestick signals</td></tr>
+          <tr><td>Cycle</td><td>HT_DCPERIOD, HT_TRENDMODE</td><td>Hilbert-transform cycles</td></tr>
+        </table>
+        <p>
+          Use <code>list_functions()</code> (our wrapper around
+          <code>talib.get_function_groups()</code>) to browse them all. Candle
+          patterns are a fun, high-leverage area: they return +100/-100/0 and
+          slot directly into a signal.
+        </p>
+
+        <div class="callout tryit">
+          <div class="callout-title">🛠️ Try it</div>
+          <p>
+            Add <code>("STOCH", {"fastk_period": 14})</code> and
+            <code>("ADX", {"timeperiod": 14})</code> to the
+            <code>add_indicators</code> call in <code>code/m5_talib.py</code>,
+            then build a signal: long only when <code>ADX &gt; 25</code> (a real
+            trend exists) and the stochastic is turning up from oversold. Backtest
+            it with <code>quantlab.backtest.backtest_signal</code>. You've
+            combined two TA-Lib indicators with custom settings into a tradeable,
+            tested rule.
+          </p>
+        </div>
+
+        <div class="callout concept">
+          <div class="callout-title">✅ You now master</div>
+          <p>
+            TA-Lib's function and abstract APIs, its three gotchas (warmup,
+            input contract, float params), the function families, and — most
+            importantly — wrapping it in the QuantLab contract so it composes and
+            is verifiable against your own implementations. Next: pandas-ta's
+            DataFrame-native breadth.
           </p>
         </div>
 

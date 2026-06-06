@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>QuantLab — XGBoost & LightGBM Alpha</title>
+  <title>QuantLab — XGBoost &amp; LightGBM Alpha</title>
   <link rel="stylesheet" href="../assets/css/course.css" />
 </head>
 <body data-root="lessons" data-lesson-id="12-boosting">
@@ -13,41 +13,143 @@
       <div class="content-inner">
 
         <p class="eyebrow">Module 12 · Machine Learning</p>
-        <h1>XGBoost & LightGBM Alpha</h1>
-        <p class="lead">Gradient-boosted trees are the workhorse of tabular alpha. We train, validate, and interpret them — and feed their predictions back into the backtest engine.</p>
+        <h1>XGBoost &amp; LightGBM Alpha</h1>
+        <p class="lead">
+          Gradient-boosted trees are the workhorse of tabular alpha: they capture
+          nonlinear feature interactions, shrug off feature scaling, and give
+          strong baselines fast. We train them <em>honestly</em> (time-ordered,
+          early-stopped), interpret them with importance/SHAP, and — the only
+          test that counts — backtest their predictions.
+        </p>
         <div class="progress-pill" data-progress></div>
 
-        <div class="callout tryit">
-          <div class="callout-title">🚧 Full lesson in progress</div>
+        <h2>1. Why boosted trees for market features</h2>
+        <p>
+          Our features (RSI, z-score, ATR ratios, momentum) interact nonlinearly:
+          "high RSI" means different things in a low-volatility uptrend vs a
+          choppy range. Tree ensembles model those interactions automatically,
+          need no scaling, handle monotonic and threshold effects naturally, and
+          train in seconds. On tabular financial data they routinely beat neural
+          nets — and they're far easier to validate.
+        </p>
+        <table>
+          <tr><th></th><th>XGBoost</th><th>LightGBM</th></tr>
+          <tr><td>Tree growth</td><td>level-wise (depth)</td><td>leaf-wise (loss)</td></tr>
+          <tr><td>Speed on big data</td><td>fast</td><td>usually faster</td></tr>
+          <tr><td>Categoricals</td><td>needs encoding</td><td>native support</td></tr>
+          <tr><td>Tendency</td><td>robust default</td><td>can overfit if unconstrained</td></tr>
+        </table>
+
+        <h2>2. Training, the honest way</h2>
+        <p>
+          Our <code>quantlab.ml.models</code> wrappers bake in the discipline:
+          a <strong>chronological</strong> train/test split (never random — that
+          leaks the future), early stopping on the held-out set, and predictions
+          returned as <em>probabilities</em> so position sizing is a separate,
+          testable decision.
+        </p>
+        <div class="code-block" data-filename="code/m12_boosting.py">
+<textarea class="src">"""Module 12 — gradient-boosted alpha (XGBoost + LightGBM) and predictions->PnL."""
+from quantlab.data import get_provider
+from quantlab.ml import assemble_dataset, triple_barrier_labels
+from quantlab.ml.models import train_xgb, train_lgbm, proba_to_signal
+from quantlab.backtest.engine import backtest_signal
+
+df = get_provider("yahoo").get_ohlcv("QQQ", start="2010-01-01")
+close = df["close"]
+
+lab = triple_barrier_labels(close, horizon=10, upper=2.0, lower=2.0)
+y = (lab["label"] > 0).astype(float).where(lab["label"].notna())
+X, y = assemble_dataset(df, y)
+
+for name, trainer in [("XGBoost", train_xgb), ("LightGBM", train_lgbm)]:
+    model, info = trainer(X, y, test_size=0.3)
+    print(f"\n=== {name} ===  accuracy={info['accuracy']:.3f}  auc={info['auc']:.3f}")
+    # Accuracy is NOT edge — backtest the predictions. Trade only when confident.
+    signal = proba_to_signal(info["proba"], long_th=0.55)
+    s = backtest_signal(close.loc[signal.index], signal, fee_bps=1.0)["stats"]
+    print(f"  OOS: return={s['total_return']:.1%} sharpe={s['sharpe']:.2f} "
+          f"maxDD={s['max_drawdown']:.1%}")
+
+imp = sorted(zip(X.columns, model.feature_importances_), key=lambda t: -t[1])
+print("\nTop features:", [f"{n}({v})" for n, v in imp[:5]])</textarea>
+        </div>
+        <p class="output-label">Expected output (numbers vary)</p>
+        <div class="output">=== XGBoost ===  accuracy=0.543  auc=0.546
+  OOS: return=22.0% sharpe=0.46 maxDD=-7.7%
+=== LightGBM ===  accuracy=0.538  auc=0.522
+  OOS: return=47.2% sharpe=1.00 maxDD=-7.7%
+Top features: ['atr_14(56)', 'ret_20(34)', 'rsi_14(33)', 'sma_50(31)', 'std_20(27)']</div>
+
+        <div class="callout pitfall">
+          <div class="callout-title">⚠️ Early stopping must use a time-ordered set</div>
           <p>
-            The course is being written module-by-module for maximum depth. This
-            lesson's detailed outline is below so you can see exactly what it will
-            cover — and the underlying <code>quantlab</code> package code it builds
-            on already exists and is tested. Modules 0–4 are complete and runnable;
-            work through those first.
+            Early stopping picks the number of trees by watching a validation
+            score. If that validation set is a <em>random</em> sample, the model
+            tunes itself using future bars — a leak that inflates every metric.
+            Our wrappers split chronologically and early-stop on the <em>last</em>
+            slice. Small detail, enormous consequence.
           </p>
         </div>
 
-        <h2>What this lesson will cover</h2>
-                <h3>Why boosted trees for tabular features</h3>
-        <p>Nonlinear interactions, robustness to feature scale, and strong baselines vs deep nets on tabular market data.</p>
-        <h3>XGBoost vs LightGBM</h3>
-        <p>API differences, speed, categorical handling, and when to pick which.</p>
-        <h3>Validation done right</h3>
-        <p>Early stopping on a time-ordered validation set, not a random one; avoiding the leak.</p>
-        <h3>Feature importance & SHAP</h3>
-        <p>Gain/cover vs SHAP values for honest, per-prediction attribution — and spotting features that are leaks in disguise.</p>
-        <h3>Predictions to positions</h3>
-        <p>Turning predicted probabilities/returns into sized, leak-free signals for quantlab.backtest.</p>
+        <h2>3. Interpretation: importance and SHAP</h2>
+        <p>
+          Feature importance (gain/split counts) tells you <em>which</em> features
+          the model leans on; <strong>SHAP</strong> values tell you <em>how</em>
+          each feature pushed each individual prediction up or down — and are the
+          best tool for catching a "feature" that's secretly a leak (e.g. a column
+          that's implausibly predictive).
+        </p>
+        <div class="code-block" data-filename="shap_example.py">
+<textarea class="src">import shap   # pip install shap
+from quantlab.ml.models import train_lgbm
+
+model, info = train_lgbm(X, y)
+explainer = shap.TreeExplainer(model)
+shap_values = explainer.shap_values(X.iloc[-500:])   # explain recent rows
+shap.summary_plot(shap_values, X.iloc[-500:])        # beeswarm of feature impact
+# A feature with huge, one-sided SHAP that "shouldn't" matter is a leak red flag.</textarea>
+        </div>
+
+        <h2>4. Predictions to positions</h2>
+        <p>
+          A classifier outputs P(up). Turning that into a position is a separate
+          decision with real consequences. Going long only when the model is
+          <em>confident</em> (P &gt; 0.55, not merely &gt; 0.5) trades less,
+          pays fewer costs, and is more robust to a noisy classifier — which is
+          exactly what <code>proba_to_signal</code> does before the backtest
+          engine applies the one-bar execution delay.
+        </p>
 
         <div class="callout better">
-          <div class="callout-title">🧱 Already in the repo</div>
+          <div class="callout-title">🧱 The full, honest stack</div>
           <p>
-            The reusable building blocks for this module live in the
-            <code>quantlab/</code> package (data layer, indicators, backtest +
-            stats engine, strategy combiner) and are exercised by the
-            <code>tests/</code> suite. The lesson narration will show you how they
-            were built and how to extend them.
+            Registry features → volatility-scaled triple-barrier labels →
+            time-ordered split with early stopping → confidence-gated signal →
+            leak-free backtest with costs. Every link was built and tested in
+            earlier modules. That end-to-end integrity — not any single model — is
+            what makes results you can stake capital on.
+          </p>
+        </div>
+
+        <div class="callout tryit">
+          <div class="callout-title">🛠️ Try it</div>
+          <p>
+            Sweep <code>long_th</code> from 0.50 to 0.65 and plot out-of-sample
+            Sharpe vs threshold. You'll typically see a sweet spot: too low and
+            you trade noise; too high and you barely trade. Then add a short leg
+            (go short when P &lt; 0.45) and compare. You're now tuning the
+            <em>policy</em>, not just the model.
+          </p>
+        </div>
+
+        <div class="callout concept">
+          <div class="callout-title">✅ You now master</div>
+          <p>
+            XGBoost vs LightGBM, leak-free training with chronological splits and
+            early stopping, importance/SHAP interpretation (and leak-hunting), and
+            converting probabilities into a backtested policy. Next: optimize all
+            of it — strategy <em>and</em> model — with Optuna.
           </p>
         </div>
 

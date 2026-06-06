@@ -20,8 +20,11 @@ from .numpy_indicators import (
     sma,
     true_range,
 )
+from .numba_indicators import chandelier_long_stop, supertrend
+from .registry import available, combine, register
 
 __all__ = [
+    # from-scratch NumPy (Module 1)
     "sma",
     "ewma",
     "rolling_std",
@@ -29,4 +32,11 @@ __all__ = [
     "rsi",
     "true_range",
     "atr",
+    # path-dependent / Numba (Module 8)
+    "supertrend",
+    "chandelier_long_stop",
+    # unified registry (Module 7)
+    "combine",
+    "register",
+    "available",
 ]

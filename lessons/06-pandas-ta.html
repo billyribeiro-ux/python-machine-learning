@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>QuantLab — pandas-ta & Custom Studies</title>
+  <title>QuantLab — pandas-ta &amp; Custom Studies</title>
   <link rel="stylesheet" href="../assets/css/course.css" />
 </head>
 <body data-root="lessons" data-lesson-id="06-pandas-ta">
@@ -13,41 +13,141 @@
       <div class="content-inner">
 
         <p class="eyebrow">Module 6 · Indicators</p>
-        <h1>pandas-ta & Custom Studies</h1>
-        <p class="lead">pandas-ta adds 130+ indicators directly onto DataFrames and lets you compose whole 'studies'. We use it for breadth and learn where it complements (and where it diverges from) TA-Lib.</p>
+        <h1>pandas-ta &amp; Custom Studies</h1>
+        <p class="lead">
+          pandas-ta adds 130+ indicators directly onto DataFrames and lets you
+          declare whole "studies" (named bundles of indicators) in one call. We
+          use it for breadth and convenience — and learn exactly where it
+          diverges from TA-Lib so your backtests stay reproducible.
+        </p>
         <div class="progress-pill" data-progress></div>
 
-        <div class="callout tryit">
-          <div class="callout-title">🚧 Full lesson in progress</div>
+        <h2>1. The DataFrame-native approach</h2>
+        <p>
+          Where TA-Lib speaks raw arrays, pandas-ta attaches a <code>.ta</code>
+          accessor to any DataFrame: <code>df.ta.rsi(length=14)</code> returns an
+          indexed Series; <code>df.ta.macd()</code> returns a multi-column frame.
+          It's pure Python (no C library to install), which makes it frictionless
+          for exploration — at the cost of speed on hot paths.
+        </p>
+        <div class="code-block" data-filename="pandas_ta_basics.py">
+<textarea class="src">import pandas_ta as ta
+import pandas as pd
+from quantlab.data import get_provider
+
+# pandas-ta expects capitalized OHLCV column names; map our normalized frame up.
+df = get_provider("yahoo").get_ohlcv("AAPL", start="2020-01-01")
+pdf = df.rename(columns=str.capitalize)        # open->Open, close->Close, ...
+
+pdf["RSI_14"] = pdf.ta.rsi(length=14)
+macd = pdf.ta.macd(fast=12, slow=26, signal=9)  # returns 3 columns
+bbands = pdf.ta.bbands(length=20, std=2.0)
+pdf = pd.concat([pdf, macd, bbands], axis=1)
+print(pdf.filter(regex="RSI|MACD|BB").tail(3).round(2))</textarea>
+        </div>
+
+        <h2>2. Strategy objects: declare a bundle once</h2>
+        <p>
+          pandas-ta's <code>Strategy</code> lets you name a set of indicators
+          with custom settings and apply them all at once with
+          <code>df.ta.strategy(...)</code> — even multi-threaded. This is the
+          pandas-ta expression of "combine multiple indicators with custom
+          settings."
+        </p>
+        <div class="code-block" data-filename="pandas_ta_strategy.py">
+<textarea class="src">import pandas_ta as ta
+
+my_study = ta.Strategy(
+    name="trend_momo_vol",
+    description="A trend + momentum + volatility bundle",
+    ta=[
+        {"kind": "sma", "length": 50},
+        {"kind": "sma", "length": 200},
+        {"kind": "rsi", "length": 14},
+        {"kind": "macd", "fast": 12, "slow": 26, "signal": 9},
+        {"kind": "atr", "length": 14},
+        {"kind": "bbands", "length": 20, "std": 2.0},
+    ],
+)
+# Applies every indicator in the study, adding columns in place.
+pdf.ta.strategy(my_study)
+print([c for c in pdf.columns if c not in ("Open","High","Low","Close","Volume")][:10])</textarea>
+        </div>
+
+        <div class="callout pitfall">
+          <div class="callout-title">⚠️ Definitions diverge — pick one source of truth</div>
           <p>
-            The course is being written module-by-module for maximum depth. This
-            lesson's detailed outline is below so you can see exactly what it will
-            cover — and the underlying <code>quantlab</code> package code it builds
-            on already exists and is tested. Modules 0–4 are complete and runnable;
-            work through those first.
+            pandas-ta and TA-Lib don't always agree to the last decimal. RSI
+            smoothing, MACD defaults, and Bollinger population-vs-sample standard
+            deviation can differ. That's fine until a backtest's results silently
+            depend on which library computed the indicator. <strong>Rule:</strong>
+            for any indicator a strategy actually trades on, pin a single
+            implementation (ours, TA-Lib, or pandas-ta) and test against it — so
+            results are reproducible regardless of library versions.
           </p>
         </div>
 
-        <h2>What this lesson will cover</h2>
-                <h3>The DataFrame extension API</h3>
-        <p>df.ta.rsi(), df.ta.macd(), and the .ta.strategy() runner that computes a named bundle of indicators in one call.</p>
-        <h3>Building a custom Strategy object</h3>
-        <p>Declaring a reusable set of indicators with custom settings as a ta.Strategy, then applying it across a universe.</p>
-        <h3>Multiprocessing & performance notes</h3>
-        <p>When pandas-ta's convenience costs you speed, and how to fall back to our Polars/NumPy implementations for hot paths.</p>
-        <h3>TA-Lib vs pandas-ta divergences</h3>
-        <p>Subtle definitional differences (e.g. RSI smoothing, MACD defaults) and how to pick a single source of truth so backtests are reproducible.</p>
-        <h3>Composing into the QuantLab pipeline</h3>
-        <p>Normalizing pandas-ta output back into our schema and feeding it to the backtest engine.</p>
+        <h2>3. Runnable: pandas-ta with a graceful fallback</h2>
+        <p>
+          pandas-ta currently ships wheels only for Python ≥ 3.12, so on 3.11 it
+          may not install. The script below demonstrates the API when present and
+          otherwise computes the <em>same</em> indicators via our registry —
+          proving the concepts transfer regardless of library availability.
+        </p>
+        <div class="code-block" data-filename="code/m6_pandas_ta.py">
+<textarea class="src">"""Module 6 — pandas-ta (with a graceful fallback to the QuantLab registry)."""
+import pandas as pd
+from quantlab.data import get_provider
+
+df = get_provider("yahoo").get_ohlcv("AAPL", start="2020-01-01")
+
+try:
+    import pandas_ta as ta  # noqa
+    pdf = df.rename(columns=str.capitalize)
+    pdf["RSI_14"] = pdf.ta.rsi(length=14)
+    macd = pdf.ta.macd(fast=12, slow=26, signal=9)
+    pdf = pd.concat([pdf, macd], axis=1)
+    print(pdf.filter(regex="RSI|MACD").tail(3).round(2))
+except ImportError:
+    print("pandas-ta unavailable here — same indicators via QuantLab registry:")
+    from quantlab.indicators import combine
+    feats = combine(df, [("rsi", {"window": 14}),
+                         ("ewma", {"span": 12}), ("ewma", {"span": 26})])
+    feats["macd"] = feats["ewma_12"] - feats["ewma_26"]
+    print(feats[["rsi_14", "macd"]].tail(3).round(3))</textarea>
+        </div>
 
         <div class="callout better">
-          <div class="callout-title">🧱 Already in the repo</div>
+          <div class="callout-title">🧱 When to reach for which</div>
           <p>
-            The reusable building blocks for this module live in the
-            <code>quantlab/</code> package (data layer, indicators, backtest +
-            stats engine, strategy combiner) and are exercised by the
-            <code>tests/</code> suite. The lesson narration will show you how they
-            were built and how to extend them.
+            <strong>pandas-ta</strong> for breadth and quick exploration (no C
+            dependency, huge catalog, DataFrame-native). <strong>TA-Lib</strong>
+            for canonical, fast, widely-trusted definitions. <strong>Our
+            registry / NumPy / Polars / Numba</strong> for production hot paths,
+            multi-symbol scale, path-dependent indicators, and total control. A
+            principal engineer uses all three behind one uniform interface —
+            which is exactly what Module 7 builds.
+          </p>
+        </div>
+
+        <div class="callout tryit">
+          <div class="callout-title">🛠️ Try it</div>
+          <p>
+            If you're on Python 3.12+, install pandas-ta and build a
+            <code>ta.Strategy</code> with five indicators of your choosing, then
+            compare its RSI column to <code>quantlab.indicators.rsi</code> on the
+            same data. Note any divergence and decide which you'd standardize on —
+            then write a one-line test asserting your chosen source stays put.
+          </p>
+        </div>
+
+        <div class="callout concept">
+          <div class="callout-title">✅ You now master</div>
+          <p>
+            The <code>.ta</code> accessor, Strategy bundles, the divergence
+            pitfall and how to neutralize it, and a clear decision framework for
+            pandas-ta vs TA-Lib vs your own code. Next we unify all of these
+            behind one interface: the QuantLab indicator library.
           </p>
         </div>
 
