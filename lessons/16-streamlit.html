@@ -112,6 +112,47 @@ streamlit run app/streamlit_app.py
           </p>
         </div>
 
+        <h2>3b. The "Custom Strategy" page — build &amp; test without writing code</h2>
+        <p>
+          The flagship page wires the Module 10 configurable backtester into the
+          UI: pick a symbol and timeframe, list indicators as
+          <code>name:value</code> lines, type a <code>rule</code> (or
+          <code>entry</code>/<code>exit</code> expressions), and hit <em>Run</em>
+          — you get live metrics, an equity curve vs buy &amp; hold, drawdown, and
+          recent positions. It reuses <code>StrategyConfig</code>,
+          <code>run_strategy</code>, and <code>parse_indicator_specs</code> from
+          the package, so the page is just glue.
+        </p>
+        <div class="code-block" data-filename="custom_strategy_page.py">
+<textarea class="src">from quantlab.backtest import (StrategyConfig, run_strategy,
+                              parse_indicator_specs, available_indicators)
+
+specs, cols, errors = parse_indicator_specs(st.text_area(
+    "Indicators (name:value)", "sma:50\nsma:200\nrsi:14"))
+st.caption(f"Reference these columns in your rule: {cols}")
+
+rule = st.text_input("Rule", "sma_50 > sma_200")     # or entry/exit text inputs
+if st.button("Run backtest"):
+    cfg = StrategyConfig(indicators=specs, rule=rule,
+                         direction="long", fee_bps=1.0)
+    res = run_strategy(get_provider("yahoo"), symbol, cfg,
+                       start=start, timeframe=timeframe)
+    s = res["stats"]
+    st.metric("Sharpe", f"{s['sharpe']:.2f}")        # ...and the rest
+    st.line_chart(equity_curve(res["returns"]))</textarea>
+        </div>
+        <div class="callout deepdive">
+          <div class="callout-title">🔬 Tested headlessly with AppTest</div>
+          <p>
+            Streamlit ships <code>streamlit.testing.v1.AppTest</code>, which runs
+            the app script without a browser so you can assert on widgets and
+            outputs. We use it to verify the Custom Strategy page renders its
+            metrics on Run, the entry/exit mode works, a bad expression surfaces a
+            friendly <code>st.error</code> (instead of crashing), and the Scanner
+            page runs. A dashboard is software too — it deserves tests.
+          </p>
+        </div>
+
         <h2>4. Deployment notes</h2>
         <ul>
           <li><strong>Secrets:</strong> when you move from Yahoo to a keyed

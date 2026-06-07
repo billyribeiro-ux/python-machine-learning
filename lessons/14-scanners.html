@@ -49,11 +49,24 @@ def scan(provider, symbols, setup, rank_by="mom20", ascending=False, ...):
         <h2>2. Setups as composable predicates</h2>
         <p>
           A "setup" is just a function from the snapshot to a boolean mask, so
-          they compose with <code>&amp;</code> / <code>|</code>. Two built-ins:
-          <code>swing_pullback</code> (uptrend, RSI cooled to 40–55, liquid) and
-          <code>momentum_breakout</code> (stretched above the mean, strongly
-          trending). Both require minimum dollar volume — never scan into
-          illiquid names you can't actually trade.
+          they compose with <code>&amp;</code> / <code>|</code>. QuantLab ships
+          five snapshot setups plus an intraday one — each requires minimum
+          dollar volume, because you never scan into names you can't actually
+          trade:
+        </p>
+        <table>
+          <tr><th>Setup</th><th>Finds</th></tr>
+          <tr><td><code>swing_pullback</code></td><td>uptrend, RSI cooled to 40–55 (buy the dip)</td></tr>
+          <tr><td><code>momentum_breakout</code></td><td>stretched above the mean (z&gt;1), strongly trending</td></tr>
+          <tr><td><code>relative_strength</code></td><td>RS line vs SPY at a new high with positive RS momentum (market leaders)</td></tr>
+          <tr><td><code>gap_up</code></td><td>opened &gt;2% above prior close, above the 50-day (gap-and-go)</td></tr>
+          <tr><td><code>new_high_breakout</code></td><td>at/near the 52-week high with positive momentum</td></tr>
+          <tr><td><code>opening_range_breakout</code></td><td>intraday: broke above the first-30-min high (own pipeline)</td></tr>
+        </table>
+        <p>
+          The first five operate on the daily snapshot; <code>relative_strength</code>
+          additionally needs a benchmark (defaults to SPY) and the snapshot adds
+          the RS columns automatically.
         </p>
         <div class="code-block" data-filename="setups.py">
 <textarea class="src">def swing_pullback(snap, min_dollar_vol=5e7):
@@ -66,7 +79,18 @@ def momentum_breakout(snap, min_dollar_vol=5e7):
     return ((snap["sma20"] > snap["sma50"])
             & (snap["z20"] > 1.0)                  # stretched above the mean
             & (snap["mom60"] > 0.10)               # strong 3-month momentum
-            & (snap["dollar_vol"] > min_dollar_vol))</textarea>
+            & (snap["dollar_vol"] > min_dollar_vol))
+
+def relative_strength(snap, min_dollar_vol=5e7, near_high=0.02):
+    return ((snap["rs_pct_from_high"] >= -near_high)  # RS line near a new high
+            & (snap["rs_mom60"] > 0)                   # RS still improving
+            & (snap["sma20"] > snap["sma50"])
+            & (snap["dollar_vol"] > min_dollar_vol)).fillna(False)
+
+def gap_up(snap, min_gap=0.02, min_dollar_vol=5e7):
+    return ((snap["gap"] > min_gap)                    # opened > 2% above close
+            & (snap["close"] > snap["sma50"])
+            & (snap["dollar_vol"] > min_dollar_vol)).fillna(False)</textarea>
         </div>
 
         <h2>3. Runnable: scan a universe</h2>
@@ -112,14 +136,49 @@ print(mo.round(3).to_string() if len(mo) else "  (no matches in current regime)"
 
         <h2>5. Intraday / day-trade scanning</h2>
         <p>
-          The same scanner becomes a day-trade tool by switching the timeframe:
-          <code>scan(provider, universe, timeframe="5m", start=...)</code>. Then
-          write intraday setups — opening-range breakouts, VWAP reclaims, gap-ups
-          — as new predicates. (Yahoo serves only ~60 days of intraday data, and
-          for serious day trading you'd plug in a real-time provider behind the
-          same interface — one of the reasons we built the data layer the way we
-          did.)
+          The snapshot setups become day-trade tools just by switching the
+          timeframe: <code>scan(provider, universe, timeframe="5m", start=...)</code>.
+          Some setups, though, need <em>intra-session structure</em> — so they get
+          their own pipeline. The <strong>opening-range breakout</strong> is the
+          canonical example: it measures the high/low of the first 30 minutes,
+          then flags names that later trade above that range.
         </p>
+        <div class="code-block" data-filename="orb_scan_example.py">
+<textarea class="src">from quantlab.data import get_provider
+from quantlab.scanners import orb_scan
+
+# 5-minute bars; first 6 bars (=30 min) define the opening range.
+hits = orb_scan(get_provider("yahoo"),
+                ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMD", "TSLA"],
+                timeframe="5m", open_bars=6)
+print(hits[["or_high", "or_low", "last", "orb_up", "session_dollar_vol"]])
+# Every returned name has orb_up == True (it broke its opening-range high),
+# ranked by how actively it traded that session.</textarea>
+        </div>
+        <p>
+          Yahoo serves only ~60 days of intraday data, and for serious day trading
+          you'd plug in a real-time provider behind the <em>same</em> interface —
+          one of the reasons we built the data layer the way we did.
+        </p>
+
+        <h2>6. End-to-end testing every scanner</h2>
+        <p>
+          Two things guard the scanners. <code>code/m14_scanners_e2e.py</code>
+          <strong>auto-discovers every scanner</strong>, runs each against a live
+          ~40-symbol universe, and <em>validates</em> the results — every hit must
+          truly re-satisfy its setup, the ranking must be ordered, the liquidity
+          floor respected, and no NaNs in the output. <code>tests/test_scanners.py</code>
+          is the offline, deterministic twin (seeded synthetic data, including an
+          intraday provider for ORB) so CI checks every scanner on each push. Add
+          a new scanner and both harnesses pick it up automatically.
+        </p>
+        <div class="code-block" data-filename="run_scanner_e2e.sh" data-lang="shell">
+<textarea class="src"># Live, validated end-to-end run of every scanner (non-zero exit on any failure):
+PYTHONPATH=. python code/m14_scanners_e2e.py
+
+# Offline, deterministic equivalent (what CI runs):
+pytest tests/test_scanners.py -v</textarea>
+        </div>
 
         <div class="callout tryit">
           <div class="callout-title">🛠️ Try it</div>
