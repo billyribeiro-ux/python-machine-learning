@@ -10,6 +10,7 @@ optimization of both strategy settings and model hyperparameters.
 from .cv import PurgedKFold
 from .features import DEFAULT_FEATURES, assemble_dataset, make_features
 from .labeling import binary_labels, triple_barrier_labels
+from .meta import apply_meta, meta_dataset, triple_barrier_meta
 from .pipeline import (
     feature_importances,
     fit_full_model,
@@ -31,4 +32,8 @@ __all__ = [
     "fit_full_model",
     "feature_importances",
     "oos_signal",
+    # meta-labeling
+    "triple_barrier_meta",
+    "meta_dataset",
+    "apply_meta",
 ]

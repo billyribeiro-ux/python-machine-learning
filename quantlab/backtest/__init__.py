@@ -8,6 +8,14 @@ indicators with custom settings and produces verified statistics.
 """
 
 from .engine import backtest_signal
+from .sizing import (
+    bet_size,
+    drawdown_throttle,
+    estimate_payoff_ratio,
+    kelly_fraction,
+    kelly_size,
+    vol_target_scalar,
+)
 from .strategy import (
     StrategyConfig,
     available_indicators,
@@ -38,6 +46,13 @@ __all__ = [
     "build_signal",
     "available_indicators",
     "parse_indicator_specs",
+    # position sizing
+    "bet_size",
+    "kelly_size",
+    "kelly_fraction",
+    "estimate_payoff_ratio",
+    "vol_target_scalar",
+    "drawdown_throttle",
     # stats
     "compute_stats",
     "equity_curve",

@@ -192,13 +192,63 @@ lightgbm  OOS AUC=0.528  ret=209.4%  Sharpe=0.59</div>
           </p>
         </div>
 
+        <h2>5. Meta-labeling: a model that decides whether to bet</h2>
+        <p>
+          López de Prado's precision booster separates two questions a trading
+          system conflates. The <strong>primary</strong> model (any strategy,
+          rule, or human) picks the <em>side</em> — long or short. A
+          <strong>meta</strong> model then predicts P(this particular bet wins)
+          and decides <em>whether to take it and how big</em>. Because the side is
+          already chosen, the meta-model is a clean binary problem and can lift
+          precision dramatically without you touching the primary's logic.
+        </p>
+        <div class="code-block" data-filename="code/meta_and_sizing.py">
+<textarea class="src">from quantlab.data import get_provider
+from quantlab.backtest import build_signal, backtest_signal, bet_size
+from quantlab.research.templates import trend_pullback
+from quantlab.ml import (make_features, triple_barrier_meta, meta_dataset,
+                         apply_meta, walk_forward_predict)
+
+ohlcv = get_provider("yahoo").get_ohlcv("SPY", start="2008-01-01")
+close = ohlcv["close"]
+
+# 1) Primary supplies the SIDE.
+side = build_signal(ohlcv, trend_pullback(
+    {"fast":20,"slow":150,"rsi_w":14,"rsi_floor":40,"z_w":20,"z_entry":0.5}))
+
+# 2) Meta-labels: did holding that side for 10 bars WIN? (side-adjusted barriers)
+meta = triple_barrier_meta(close, side, horizon=10, pt=1.0, sl=1.0)
+X, y = meta_dataset(make_features(ohlcv), meta)     # features only at bet events
+print("primary win rate:", round(float(y.mean()), 3))
+
+# 3) Walk-forward OOS P(win), then GATE or SIZE the primary by it.
+proba = walk_forward_predict(X, y, kind="lightgbm", n_splits=5,
+                             label_horizon=10).reindex(close.index)
+filtered = apply_meta(side, proba, threshold=0.5)                 # take/skip
+sized    = apply_meta(side, proba, size=bet_size(proba, "normal"))# scale by conviction</textarea>
+        </div>
+        <div class="callout pitfall">
+          <div class="callout-title">⚠️ Meta-labeling is not a free win</div>
+          <p>
+            It improves <em>precision</em> (fewer bad trades), but if your primary
+            is already decent and the meta-model is weak (AUC ≈ 0.5 on hard data),
+            filtering can cut return faster than risk — judge it on Sharpe/Sortino,
+            not gut feel. Its biggest, most reliable payoff is feeding the
+            probability into <em>sizing</em> (next), where it shrinks drawdowns.
+            <code>quantlab.ml.triple_barrier_meta</code> labels each bet 1/0 with
+            side-adjusted barriers; the meta-model is trained walk-forward, so
+            every probability is out-of-sample.
+          </p>
+        </div>
+
         <div class="callout concept">
           <div class="callout-title">✅ You now master</div>
           <p>
             XGBoost vs LightGBM, leak-free training with chronological splits and
-            early stopping, importance/SHAP interpretation (and leak-hunting), and
-            converting probabilities into a backtested policy. Next: optimize all
-            of it — strategy <em>and</em> model — with Optuna.
+            early stopping, importance/SHAP interpretation (and leak-hunting),
+            converting probabilities into a backtested policy, and
+            <strong>meta-labeling</strong> to separate side from size. Next:
+            optimize all of it — strategy <em>and</em> model — with Optuna.
           </p>
         </div>
 

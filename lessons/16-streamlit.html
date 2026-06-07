@@ -44,14 +44,17 @@
 
         <h2>2. The QuantLab dashboard</h2>
         <p>
-          Our app (<code>app/streamlit_app.py</code>) has six pages — a
+          Our app (<code>app/streamlit_app.py</code>) has eight pages — a
           <strong>Custom Strategy</strong> builder, an honest
           <strong>Optimize</strong> page (Optuna with a hold-out and a live
-          Deflated-Sharpe verdict), a walk-forward <strong>ML</strong> page, a
-          combo <strong>Backtester</strong>, a universe <strong>Scanner</strong>,
-          and an <strong>Indicator explorer</strong> — all driven by the same
-          package functions you already know. Note how little app-specific code
-          there is: the heavy lifting is all imports.
+          Deflated-Sharpe verdict), an <strong>Overfitting</strong> page
+          (PBO/CPCV), a walk-forward <strong>ML</strong> page, a
+          <strong>Sizing &amp; Meta</strong> page (meta-labeling + Kelly /
+          vol-target / drawdown throttle), a combo <strong>Backtester</strong>, a
+          universe <strong>Scanner</strong>, and an <strong>Indicator
+          explorer</strong> — all driven by the same package functions you already
+          know. Note how little app-specific code there is: the heavy lifting is
+          all imports.
         </p>
         <div class="callout better">
           <div class="callout-title">🧱 The dashboard is pure glue</div>

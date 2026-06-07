@@ -162,6 +162,48 @@ for bps in (0, 1, 5, 10, 25):
     print(f"fee={bps:2d}bps  return={s['total_return']:6.1%}  sharpe={s['sharpe']:.2f}")</textarea>
         </div>
 
+        <h2>3c. Position sizing: where risk-adjusted return is won</h2>
+        <p>
+          A signal says <em>which way</em>; sizing says <em>how much</em> — and
+          that's where most of the Sharpe/Sortino actually comes from. Four
+          composable, causal tools live in <code>quantlab.backtest.sizing</code>:
+        </p>
+        <ul>
+          <li><strong>Bet size from probability</strong> — <code>bet_size(p)</code>
+            maps a model's P(win) to size, linearly (<code>2p−1</code>) or via the
+            López de Prado normal-CDF curve (size only when decisively confident).</li>
+          <li><strong>Fractional Kelly</strong> — <code>kelly_size</code> uses the
+            growth-optimal fraction <code>f*=p−(1−p)/b</code> at half strength
+            (full Kelly is brutally volatile), capped for leverage.</li>
+          <li><strong>Volatility targeting</strong> — <code>vol_target_scalar</code>
+            scales exposure so realized vol tracks a target, using <em>lagged</em>
+            vol (causal). This alone tames a signal's wild swings.</li>
+          <li><strong>Drawdown throttle</strong> — <code>drawdown_throttle</code>
+            cuts exposure after a max-drawdown breach, restoring it on recovery.</li>
+        </ul>
+        <div class="code-block" data-filename="sizing_example.py">
+<textarea class="src">from quantlab.backtest import (backtest_signal, vol_target_scalar,
+                              drawdown_throttle, bet_size)
+
+ar = close.pct_change()
+# Scale a base position to ~12% annualized vol, then throttle on a 15% drawdown.
+sized = side * vol_target_scalar(ar, target_ann_vol=0.12)
+sized = drawdown_throttle(sized, ar, max_dd=0.15, throttle=0.5)
+print(backtest_signal(close, sized)["stats"])     # watch maxDD shrink, Sortino rise</textarea>
+        </div>
+        <div class="callout better">
+          <div class="callout-title">🧱 Judge sizing on risk, not return</div>
+          <p>
+            Sizing rarely <em>maximizes</em> raw return — it maximizes
+            <em>risk-adjusted</em> return. In practice vol-targeting and the
+            drawdown throttle noticeably cut max drawdown and lift Sortino for a
+            small return give-up; half-Kelly on a meta-probability can halve
+            drawdown. All of this is wired into the Streamlit
+            <strong>Sizing &amp; Meta</strong> page (Module 16), and demonstrated
+            in <code>code/meta_and_sizing.py</code>.
+          </p>
+        </div>
+
         <h2>4. Walk-forward: the only honest estimate</h2>
         <p>
           A single in-sample backtest tells you how well you fit the past. To

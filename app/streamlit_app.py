@@ -33,7 +33,15 @@ from quantlab.backtest import (
     parse_indicator_specs,
     run_strategy,
 )
-from quantlab.backtest import backtest_signal
+from quantlab.backtest import (
+    backtest_signal,
+    bet_size,
+    build_signal,
+    drawdown_throttle,
+    estimate_payoff_ratio,
+    kelly_size,
+    vol_target_scalar,
+)
 from quantlab.backtest.stats import drawdown_series, equity_curve
 from quantlab.research import (
     cpcv_sharpe_distribution,
@@ -42,12 +50,15 @@ from quantlab.research import (
 )
 from quantlab.research.templates import TEMPLATES
 from quantlab.ml import (
+    apply_meta,
     assemble_dataset,
     feature_importances,
     fit_full_model,
     make_features,
+    meta_dataset,
     oos_signal,
     triple_barrier_labels,
+    triple_barrier_meta,
     walk_forward_predict,
 )
 from quantlab.scanners import (
@@ -73,8 +84,8 @@ def load(symbol: str, start, timeframe: str) -> pd.DataFrame:
 
 st.sidebar.title("QuantLab")
 page = st.sidebar.radio(
-    "Page", ["Custom Strategy", "Optimize", "Overfitting", "ML", "Backtester",
-             "Scanner", "Indicators"]
+    "Page", ["Custom Strategy", "Optimize", "Overfitting", "ML", "Sizing & Meta",
+             "Backtester", "Scanner", "Indicators"]
 )
 
 DEFAULT_UNIVERSE = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "META",
@@ -352,6 +363,104 @@ elif page == "ML":
             st.bar_chart(feature_importances(model, X.columns))
             st.caption("AUC ≈ 0.52–0.56 on liquid daily data is a realistic edge. "
                        "Beware anyone reporting 0.9 — that's almost always leakage.")
+
+
+# --------------------------------------------------------------------------- #
+elif page == "Sizing & Meta":
+    st.header("Meta-Labeling &amp; Position Sizing")
+    st.caption("A primary strategy supplies the SIDE; a walk-forward meta-model "
+               "decides whether to take the bet (precision); sizing decides how "
+               "much (vol-target, fractional Kelly, drawdown throttle).")
+
+    c1, c2, c3, c4 = st.columns(4)
+    symbol = c1.text_input("Symbol", "SPY")
+    start = c2.text_input("Start date", "2008-01-01")
+    template_name = c3.selectbox("Primary strategy", list(TEMPLATES))
+    meta_kind = c4.selectbox("Meta model", ["lightgbm", "xgboost", "logistic"])
+
+    d1, d2, d3, d4 = st.columns(4)
+    horizon = d1.slider("Horizon (bars)", 3, 30, 10)
+    barrier = d2.slider("Barrier (× vol)", 1.0, 4.0, 1.0, 0.5)
+    meta_th = d3.slider("Meta threshold", 0.40, 0.70, 0.50, 0.01)
+    sizing = d4.selectbox("Sizing", ["meta filter", "prob (linear)",
+                                     "prob (normal)", "half-Kelly"])
+
+    e1, e2, e3 = st.columns(3)
+    use_vt = e1.checkbox("Volatility target")
+    target_vol = e2.slider("Target ann. vol", 0.05, 0.40, 0.15, 0.01)
+    use_dd = e3.checkbox("Drawdown throttle")
+    max_dd = e3.slider("Max DD before throttle", 0.05, 0.40, 0.20, 0.05)
+
+    if st.button("Build & compare", type="primary"):
+        build, space, invalid = TEMPLATES[template_name]
+        # Use the midpoint of each param range for a reasonable primary.
+        params = {}
+        for k, spec in space.items():
+            params[k] = (spec[1] + spec[2]) // 2 if spec[0] == "int" else \
+                        (spec[1] + spec[2]) / 2 if spec[0] == "float" else spec[1][0]
+        if "fast" in params and "slow" in params:
+            params["fast"], params["slow"] = 20, 150
+        try:
+            with st.spinner("Labeling, walk-forward meta-training, sizing..."):
+                ohlcv = load(symbol, start, "1d")
+                close = ohlcv["close"]
+                side = build_signal(ohlcv, build(params))
+
+                meta = triple_barrier_meta(close, side, horizon=int(horizon),
+                                           pt=float(barrier), sl=float(barrier))
+                X, y = meta_dataset(make_features(ohlcv), meta)
+                proba = walk_forward_predict(X, y, kind=meta_kind, n_splits=5,
+                                             label_horizon=int(horizon)
+                                             ).reindex(close.index)
+
+                # Choose the sizing applied to the meta-gated bets.
+                if sizing == "prob (linear)":
+                    size = bet_size(proba, "linear")
+                elif sizing == "prob (normal)":
+                    size = bet_size(proba, "normal")
+                elif sizing == "half-Kelly":
+                    b = estimate_payoff_ratio(backtest_signal(close, side)["returns"])
+                    size = kelly_size(proba, payoff_ratio=b, fraction=0.5)
+                else:
+                    size = None
+                final = apply_meta(side, proba, threshold=float(meta_th), size=size)
+
+                ar = close.pct_change()
+                if use_vt:
+                    final = final * vol_target_scalar(ar, target_ann_vol=float(target_vol))
+                if use_dd:
+                    final = drawdown_throttle(final, ar, max_dd=float(max_dd))
+
+                def stat(sig):
+                    return backtest_signal(close.loc[sig.index], sig, fee_bps=1.0)
+                variants = {
+                    "primary (raw)": stat(side),
+                    "engineered (meta+sizing)": stat(final),
+                }
+        except Exception as exc:
+            st.error(f"Failed: {exc}")
+        else:
+            rows = []
+            for name, r in variants.items():
+                s = r["stats"]
+                rows.append({"variant": name, "total_return": s["total_return"],
+                             "CAGR": s["cagr"], "Sharpe": s["sharpe"],
+                             "Sortino": s["sortino"], "max_DD": s["max_drawdown"],
+                             "win_rate": s["win_rate"]})
+            st.subheader("Primary vs engineered")
+            st.dataframe(pd.DataFrame(rows).set_index("variant").style.format({
+                "total_return": "{:.1%}", "CAGR": "{:.1%}", "Sharpe": "{:.2f}",
+                "Sortino": "{:.2f}", "max_DD": "{:.1%}", "win_rate": "{:.1%}"}))
+
+            st.subheader("Equity curves")
+            st.line_chart(pd.DataFrame({
+                "primary": equity_curve(variants["primary (raw)"]["returns"]),
+                "engineered": equity_curve(variants["engineered (meta+sizing)"]["returns"]),
+                "buy & hold": equity_curve(close.pct_change()),
+            }))
+            st.caption("Meta-labeling lifts precision; sizing (vol-target / Kelly / "
+                       "drawdown throttle) is usually where the max-drawdown and "
+                       "Sortino improvements show up — judge on risk-adjusted terms.")
 
 
 # --------------------------------------------------------------------------- #
