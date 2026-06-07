@@ -8,6 +8,13 @@ indicators with custom settings and produces verified statistics.
 """
 
 from .engine import backtest_signal
+from .strategy import (
+    StrategyConfig,
+    available_indicators,
+    build_signal,
+    run_strategy,
+    run_strategy_multi,
+)
 from .stats import (
     cagr,
     calmar,
@@ -23,6 +30,13 @@ from .stats import (
 
 __all__ = [
     "backtest_signal",
+    # configurable strategy builder
+    "StrategyConfig",
+    "run_strategy",
+    "run_strategy_multi",
+    "build_signal",
+    "available_indicators",
+    # stats
     "compute_stats",
     "equity_curve",
     "total_return",

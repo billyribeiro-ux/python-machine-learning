@@ -81,6 +81,65 @@ html_report(res["returns"], benchmark=bench, output="tearsheet.html")
 print("Wrote tearsheet.html — open it in a browser.")</textarea>
         </div>
 
+        <h2>2b. The configurable backtester — build ANY strategy</h2>
+        <p>
+          You don't have to hand-write a signal for every idea. The
+          <code>StrategyConfig</code> builder lets you declare a strategy from
+          <em>any</em> registry indicators (with custom settings), <em>any</em>
+          entry/exit rules, and run it on <em>any</em> symbol and timeframe —
+          leak-free and timeframe-correctly annualized. Three ways to express the
+          logic, from simplest to most powerful:
+        </p>
+        <div class="code-block" data-filename="custom_strategies.py">
+<textarea class="src">from quantlab.data import get_provider
+from quantlab.backtest import StrategyConfig, run_strategy, available_indicators
+
+provider = get_provider("yahoo")
+print("Indicators you can use:", available_indicators())
+# -> ['atr', 'ewma', 'ret', 'rsi', 'sma', 'std', 'zscore']  (+ any you register)
+
+# 1) RULE: hold the position while a boolean expression is True.
+golden = StrategyConfig(
+    indicators=[("sma", {"window": 50}), ("sma", {"window": 200})],
+    rule="sma_50 > sma_200",                       # classic golden cross
+)
+res = run_strategy(provider, "SPY", golden, start="2010-01-01")
+print(res["stats"])
+
+# 2) ENTRY / EXIT: a state machine — enter on one rule, exit on another.
+rsi2 = StrategyConfig(
+    indicators=[("rsi", {"window": 2}), ("sma", {"window": 200})],
+    entry="(rsi_2 < 10) & (close > sma_200)",      # oversold, but uptrend
+    exit="rsi_2 > 60",
+)
+run_strategy(provider, "QQQ", rsi2, start="2010-01-01")
+
+# 3) SIGNAL callable: full control — use any library inside.
+from quantlab.indicators import supertrend
+def st_signal(f):
+    _, direction = supertrend(f["high"], f["low"], f["close"], 10, 3.0)
+    return (direction > 0).astype(float)
+run_strategy(provider, "NVDA", StrategyConfig(signal=st_signal), start="2015-01-01")
+
+# ANY timeframe: native intraday, or resample daily -> weekly.
+run_strategy(provider, "AAPL", golden, start=None, timeframe="5m")          # intraday
+run_strategy(provider, "AAPL", golden, start="2010-01-01", resample="W-FRI") # weekly</textarea>
+        </div>
+        <div class="callout better">
+          <div class="callout-title">🧱 Why this is the backtester you want</div>
+          <p>
+            Indicators are <em>data</em> (the Module 7 registry resolves
+            <code>("rsi", {"window": 2})</code>), rules are plain expressions over
+            the indicator + OHLCV columns (combine with <code>&amp;</code>
+            <code>|</code> <code>~</code>), and the engine guarantees the one-bar
+            execution delay so nothing leaks. Swap the symbol, the timeframe, or
+            any setting and re-run — every result is a self-describing dict you can
+            log, compare, or feed to Optuna (Module 13). Run
+            <code>code/custom_backtester.py</code> for six worked examples across
+            timeframes; <code>tests/test_strategy_builder.py</code> guards it.
+          </p>
+        </div>
+
         <h2>3. Costs and slippage: where paper edges die</h2>
         <p>
           Every position change pays the spread, commissions, and market impact.
