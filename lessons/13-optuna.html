@@ -183,6 +183,56 @@ print(f"median Sharpe={np.median(dist):.2f}  5th-pct (bad luck)={np.percentile(d
           </p>
         </div>
 
+        <h2>7. The capstone: a one-call go/no-go dossier</h2>
+        <p>
+          Every check in this module — honest optimization, Deflated Sharpe, PBO,
+          the CPCV fan, cost sensitivity — is wired into a single function,
+          <code>quantlab.research.strategy_report</code>, that emits a
+          <strong>GO / CONDITIONAL / NO-GO</strong> verdict with the reasons. The
+          decision logic (<code>evaluate_gate</code>) is a <em>pure</em> function
+          of the headline numbers, so it's deterministic and unit-tested
+          separately from the (stochastic) search.
+        </p>
+        <div class="code-block" data-filename="code/strategy_dossier.py">
+<textarea class="src">from quantlab.data import get_provider
+from quantlab.research import strategy_report
+from quantlab.research.templates import TEMPLATES
+
+ohlcv = get_provider("yahoo").get_ohlcv("SPY", start="2008-01-01")
+build, space, invalid = TEMPLATES["trend_pullback"]
+
+rep = strategy_report(ohlcv, build, space, invalid=invalid,
+                      n_trials=60, pbo_configs=40, s_blocks=10,
+                      make_tearsheet=True)   # also writes a QuantStats tearsheet
+print(rep.summary())</textarea>
+        </div>
+        <p class="output-label">A real run says NO-GO — and explains why</p>
+        <div class="output">DECISION: NO-GO
+  hold-out Sharpe : 0.57
+  deflated Sharpe : 0.638
+  PBO             : 70.2%
+  IS->OOS gap     : 0.00
+  CPCV Sharpe     : median 0.56, 5th pct -0.19, worst -0.46
+  checks:
+    [PASS] Hold-out Sharpe > 0 (critical): 0.57
+    [PASS] Deflated Sharpe > 0.6 (critical): 0.638
+    [FAIL] PBO < 50% (critical): 70.2%
+    [PASS] IS->OOS gap < 1.0: 0.00
+    [FAIL] CPCV 5th-pct Sharpe >= 0: -0.19
+    [PASS] Cost-robust Sharpe > 0: 0.09</div>
+        <div class="callout better">
+          <div class="callout-title">🧱 The dossier you'd hand a risk committee</div>
+          <p>
+            The point estimate looked fine — hold-out Sharpe 0.57, Deflated Sharpe
+            0.64 — yet the dossier says <strong>NO-GO</strong> because PBO across
+            the search space is 70%: the strategy <em>family</em> overfits, so the
+            single best config can't be trusted. A lone backtest would have hidden
+            that. This is the entire course distilled into one honest call, and it
+            powers the Streamlit <strong>Strategy Report</strong> page (Module 16),
+            which adds a downloadable QuantStats tearsheet.
+          </p>
+        </div>
+
         <div class="callout pitfall">
           <div class="callout-title">⚠️ Optimization is overfitting with extra steps</div>
           <p>

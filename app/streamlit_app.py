@@ -47,6 +47,7 @@ from quantlab.research import (
     cpcv_sharpe_distribution,
     optimize_strategy,
     pbo_for_template,
+    strategy_report,
 )
 from quantlab.research.templates import TEMPLATES
 from quantlab.ml import (
@@ -84,8 +85,8 @@ def load(symbol: str, start, timeframe: str) -> pd.DataFrame:
 
 st.sidebar.title("QuantLab")
 page = st.sidebar.radio(
-    "Page", ["Custom Strategy", "Optimize", "Overfitting", "ML", "Sizing & Meta",
-             "Backtester", "Scanner", "Indicators"]
+    "Page", ["Strategy Report", "Custom Strategy", "Optimize", "Overfitting",
+             "ML", "Sizing & Meta", "Backtester", "Scanner", "Indicators"]
 )
 
 DEFAULT_UNIVERSE = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "META",
@@ -93,7 +94,86 @@ DEFAULT_UNIVERSE = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "META",
 
 
 # --------------------------------------------------------------------------- #
-if page == "Custom Strategy":
+if page == "Strategy Report":
+    st.header("Strategy Report — the go/no-go dossier")
+    st.caption("One run through the ENTIRE pipeline: honest optimization → "
+               "Deflated Sharpe → PBO → CPCV fan → cost sensitivity → verdict. "
+               "This is the final gate before risking capital.")
+
+    c1, c2, c3, c4 = st.columns(4)
+    symbol = c1.text_input("Symbol", "SPY")
+    start = c2.text_input("Start date", "2008-01-01")
+    template_name = c3.selectbox("Strategy template", list(TEMPLATES))
+    n_trials = c4.slider("Optimization trials", 10, 120, 40, 10)
+
+    d1, d2, d3 = st.columns(3)
+    pbo_configs = d1.slider("PBO configurations", 10, 80, 40, 5)
+    s_blocks = d2.select_slider("CSCV blocks (S)", options=[6, 8, 10, 12], value=10)
+    fee = d3.number_input("Fee (bps)", 0.0, 50.0, 1.0)
+
+    if st.button("Run full report", type="primary"):
+        build, space, invalid = TEMPLATES[template_name]
+        try:
+            with st.spinner("Optimizing, deflating, running PBO + CPCV, costing..."):
+                ohlcv = load(symbol, start, "1d")
+                bench = ohlcv["close"].pct_change()
+                rep = strategy_report(ohlcv, build, space, invalid=invalid,
+                                      n_trials=int(n_trials), pbo_configs=int(pbo_configs),
+                                      s_blocks=int(s_blocks), fee_bps=float(fee),
+                                      make_tearsheet=True, benchmark=bench)
+        except Exception as exc:
+            st.error(f"Report failed: {exc}")
+        else:
+            banner = {"GO": st.success, "CONDITIONAL": st.warning, "NO-GO": st.error}
+            emoji = {"GO": "✅", "CONDITIONAL": "⚠️", "NO-GO": "⛔"}
+            banner[rep.decision](f"{emoji[rep.decision]}  DECISION: {rep.decision}")
+
+            m = st.columns(4)
+            m[0].metric("Hold-out Sharpe", f"{rep.holdout_stats['sharpe']:.2f}")
+            m[1].metric("Deflated Sharpe", f"{rep.deflated_sharpe:.2f}")
+            m[2].metric("PBO", f"{rep.pbo:.1%}")
+            m[3].metric("IS→OOS gap", f"{rep.is_oos_gap:.2f}")
+
+            st.subheader("Decision checks")
+            st.dataframe(pd.DataFrame([{
+                "check": c.name, "result": "PASS" if c.passed else "FAIL",
+                "value": c.detail, "critical": c.critical} for c in rep.checks]))
+
+            st.subheader("Best parameters")
+            st.json({k: (round(v, 3) if isinstance(v, float) else v)
+                     for k, v in rep.best_params.items()})
+
+            cc = st.columns(2)
+            with cc[0]:
+                st.subheader("CPCV out-of-sample Sharpe fan")
+                st.caption(f"median {rep.cpcv['median']:.2f} · 5th pct (bad luck) "
+                           f"{rep.cpcv['p05']:.2f} · worst {rep.cpcv['worst']:.2f}")
+                counts, edges = np.histogram(rep.cpcv["paths"], bins=20)
+                centers = (edges[:-1] + edges[1:]) / 2
+                st.bar_chart(pd.DataFrame({"paths": counts}, index=np.round(centers, 2)))
+            with cc[1]:
+                st.subheader("Cost sensitivity")
+                st.line_chart(rep.cost_table[["sharpe"]])
+                st.dataframe(rep.cost_table.style.format({
+                    "total_return": "{:.1%}", "sharpe": "{:.2f}",
+                    "max_drawdown": "{:.1%}"}))
+
+            st.subheader("Hold-out equity curve")
+            st.line_chart(equity_curve(rep.holdout_returns).rename("hold-out equity"))
+
+            # Offer the full QuantStats tearsheet as a download.
+            if rep.tearsheet_path:
+                try:
+                    with open(rep.tearsheet_path, "rb") as fh:
+                        st.download_button("Download QuantStats tearsheet (HTML)",
+                                           fh.read(), file_name="tearsheet.html",
+                                           mime="text/html")
+                except OSError:
+                    pass
+
+
+# --------------------------------------------------------------------------- #
+elif page == "Custom Strategy":
     st.header("Custom Strategy Builder")
     st.caption("Declare any indicators + rules, on any symbol and timeframe — "
                "backtested leak-free (decide on bar t, act on t+1).")

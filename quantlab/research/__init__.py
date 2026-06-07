@@ -16,6 +16,7 @@ from .metrics import (
 )
 from .cpcv import CombinatorialPurgedCV, cpcv_sharpe_distribution
 from .optimize import OptimizeResult, optimize_strategy
+from .report import ReportCheck, StrategyReport, evaluate_gate, strategy_report
 from .pbo import (
     PBOResult,
     cscv_pbo,
@@ -29,6 +30,11 @@ from .walkforward import chronological_split, fold_sharpes, split_index
 __all__ = [
     "optimize_strategy",
     "OptimizeResult",
+    # end-to-end go/no-go dossier (capstone)
+    "strategy_report",
+    "StrategyReport",
+    "evaluate_gate",
+    "ReportCheck",
     # combinatorial purged CV + probability of backtest overfitting (capstone)
     "CombinatorialPurgedCV",
     "cpcv_sharpe_distribution",
