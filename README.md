@@ -62,11 +62,72 @@ python code/m12_boosting.py    # XGBoost/LightGBM -> backtested signal
 python code/m13_optuna.py      # optimize strategy settings (single + Pareto)
 python code/m14_scanners.py    # multi-symbol swing/momentum scanners
 python code/m15_options.py     # Black-Scholes, Greeks, implied vol
+python code/honest_research.py # hold-out optimize + Deflated Sharpe + PBO/CPCV
+python code/meta_and_sizing.py # meta-labeling + Kelly/vol-target/DD-throttle
+python code/strategy_dossier.py# the full GO/NO-GO report in one call
+python code/paper_trading.py   # paper-trade strategies forward (simulation)
 streamlit run app/streamlit_app.py   # the interactive dashboard (Module 16)
 ```
 
 If you didn't run `pip install -e .`, prefix with the repo root on the path:
 `PYTHONPATH=. python code/m1_indicators.py`.
+
+---
+
+## The dashboard, page by page
+
+```bash
+streamlit run app/streamlit_app.py     # opens http://localhost:8501
+```
+
+Nine pages, each a thin shell over the tested `quantlab` package. A natural tour:
+
+1. **Strategy Report** — the headline. Pick a symbol + strategy template, hit
+   *Run full report*, and get a **GO / CONDITIONAL / NO-GO** verdict backed by
+   hold-out Sharpe, **Deflated Sharpe**, **PBO**, the **CPCV** Sharpe fan, a
+   cost-sensitivity curve, the hold-out equity curve, and a downloadable
+   QuantStats tearsheet. Start here — it's the whole pipeline in one click.
+2. **Custom Strategy** — build any strategy by hand: list indicators as
+   `name:value`, type a `rule` (or `entry`/`exit`), choose timeframe/direction,
+   and see live metrics, equity vs buy-&-hold, drawdown, and recent positions.
+3. **Optimize** — Optuna search with hold-out discipline; shows best params,
+   in-sample vs out-of-sample Sharpe, the Deflated Sharpe, and a trustworthy/
+   over-fit badge.
+4. **Overfitting** — PBO via CSCV with a red/amber/green verdict, the λ-logit
+   histogram, an in-sample-vs-out-of-sample scatter, and the CPCV fan.
+5. **ML** — walk-forward, out-of-sample XGBoost/LightGBM/logistic: OOS AUC, PnL
+   vs buy-&-hold, and feature importances.
+6. **Sizing & Meta** — meta-label a primary strategy, then size it (probability,
+   half-Kelly, volatility target, drawdown throttle); compares primary vs
+   engineered.
+7. **Backtester** — slider-driven multi-indicator combo with live equity/stats.
+8. **Scanner** — rank a universe with any of the six scanners (incl. intraday
+   opening-range breakout).
+9. **Indicators** — chart price with SMAs and the Numba Supertrend line.
+
+Every button is exercised headlessly in CI-style checks with Streamlit's
+`AppTest`, so the app is tested software, not a demo.
+
+---
+
+## Paper trading (simulation)
+
+Run your strategies *forward* on fresh data with a simulated broker — the honest
+bridge between a backtest and a live deployment. **No real orders, no broker
+API, no money at risk.**
+
+```bash
+PYTHONPATH=. python code/paper_trading.py                # one rebalance now
+PYTHONPATH=. python code/paper_trading.py --interval 60  # rebalance every 60 min
+```
+
+The `PaperTradingEngine` pulls fresh data through the provider, builds each
+strategy's latest signal, aggregates them into per-symbol target weights (capped
+to no leverage), and routes the implied orders to a `PaperBroker` that fills with
+fees + slippage. State (cash, positions, blotter, equity curve) persists to
+`data/paper/` so you can stop and resume. Because it's provider-agnostic, the
+same engine paper-trades a real-time feed by swapping the provider in
+`quantlab/data`.
 
 ---
 

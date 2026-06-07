@@ -175,6 +175,48 @@ if st.button("Run backtest"):
           </p>
         </div>
 
+        <h2>3c. Paper trading: run strategies forward</h2>
+        <p>
+          The honest bridge between a backtest and a live deployment is
+          <strong>paper trading</strong> — running your strategies forward on
+          fresh data with a simulated broker (no real orders). The
+          <code>quantlab.live</code> package provides a <code>PaperBroker</code>
+          (cash, positions, fees, slippage, persisted to disk) and a
+          <code>PaperTradingEngine</code> that, on each rebalance, pulls fresh
+          data, builds each strategy's latest signal, aggregates per-symbol target
+          weights, and routes the orders.
+        </p>
+        <div class="code-block" data-filename="code/paper_trading.py">
+<textarea class="src">from quantlab.data import get_provider
+from quantlab.backtest.strategy import StrategyConfig
+from quantlab.live import PaperTradingEngine, StrategySlot
+
+slots = [
+    StrategySlot("spy_trend", "SPY",
+                 StrategyConfig(indicators=[("sma", {"window": 50}), ("sma", {"window": 200})],
+                                rule="sma_50 > sma_200"), weight=0.5),
+    StrategySlot("qqq_trend", "QQQ",
+                 StrategyConfig(indicators=[("sma", {"window": 50}), ("sma", {"window": 200})],
+                                rule="sma_50 > sma_200"), weight=0.5),
+]
+engine = PaperTradingEngine(get_provider("yahoo"), slots, timeframe="1d")
+snap = engine.run_once()              # one rebalance; state saved to data/paper/
+print(snap["equity"], snap["orders"])
+# engine.run_forever(interval_minutes=60)   # or run on a schedule</textarea>
+        </div>
+        <div class="callout pitfall">
+          <div class="callout-title">⚠️ Paper, not live — and mind the last bar</div>
+          <p>
+            This is a <em>simulation</em>: no broker API, no real money. Two things
+            to respect before going further: it acts on the <em>latest available
+            bar</em> (which intraday may be partially formed — in production you'd
+            align to the last <em>closed</em> bar), and real fills differ from
+            paper fills (queue position, partial fills, impact). The accounting,
+            though, is identical — wiring a real broker means implementing the same
+            <code>rebalance</code> against an execution API.
+          </p>
+        </div>
+
         <h2>4. Deployment notes</h2>
         <ul>
           <li><strong>Secrets:</strong> when you move from Yahoo to a keyed
