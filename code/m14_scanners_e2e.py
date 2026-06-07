@@ -27,7 +27,7 @@ import pandas as pd
 
 from quantlab.data import get_provider
 from quantlab.scanners import scanner as S
-from quantlab.scanners import latest_snapshot, scan
+from quantlab.scanners import latest_snapshot, scan, orb_scan
 
 # A broad, liquid universe so setups have a realistic chance of matching.
 UNIVERSE = [
@@ -52,6 +52,31 @@ SETUP_RULES = {
         and r["mom60"] > 0.10
         and r["dollar_vol"] > mdv
     ),
+    "relative_strength": lambda r, mdv: (
+        r["rs_pct_from_high"] >= -0.02
+        and r["rs_mom60"] > 0
+        and r["sma20"] > r["sma50"]
+        and r["dollar_vol"] > mdv
+    ),
+    "gap_up": lambda r, mdv: (
+        r["gap"] > 0.02
+        and r["close"] > r["sma50"]
+        and r["dollar_vol"] > mdv
+    ),
+    "new_high_breakout": lambda r, mdv: (
+        r["pct_from_high"] >= -0.005
+        and r["mom60"] > 0.05
+        and r["dollar_vol"] > mdv
+    ),
+}
+
+# Sensible ranking column per scanner for the report.
+RANK_BY = {
+    "momentum_breakout": "mom60",
+    "swing_pullback": "mom20",
+    "relative_strength": "rs_mom60",
+    "gap_up": "gap",
+    "new_high_breakout": "mom60",
 }
 
 MIN_DOLLAR_VOL = 5e7   # the default liquidity floor used by the setups
@@ -150,7 +175,7 @@ def main() -> int:
         print("-" * 74)
         try:
             # Rank by a sensible column for each setup.
-            rank_by = "mom60" if name == "momentum_breakout" else "mom20"
+            rank_by = RANK_BY.get(name, "mom20")
             rank_problems, hits = check_ranking(name, provider, setup, rank_by)
             problems = validate_scan(name, setup, snap, hits) + rank_problems
 
@@ -193,6 +218,47 @@ def main() -> int:
         # Intraday data can be unavailable/rate-limited on Yahoo; report, don't fail hard.
         print(f"  intraday data unavailable from Yahoo right now ({e!r}); "
               "daily checks above are authoritative.")
+    print()
+
+    # Dedicated intraday scanner: opening-range breakout (its own pipeline).
+    print("=" * 74)
+    print("SCANNER: opening_range_breakout  (intraday, own session pipeline)")
+    print("-" * 74)
+    try:
+        orb_universe = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMD", "TSLA", "META"]
+        hits = orb_scan(provider, orb_universe, start=None, timeframe="5m", open_bars=6)
+        problems = []
+        # Every hit must actually have broken above its opening range.
+        for sym in hits.index:
+            if not bool(hits.loc[sym, "orb_up"]):
+                problems.append(f"{sym} in results but orb_up is False")
+            if hits.loc[sym, "last"] <= hits.loc[sym, "or_high"]:
+                # last need not exceed or_high (it can pull back after breaking),
+                # but or_high must be a valid number.
+                if np.isnan(hits.loc[sym, "or_high"]):
+                    problems.append(f"{sym} has NaN opening-range high")
+        # Ranking by session dollar volume must be descending.
+        if len(hits) > 1:
+            v = hits["session_dollar_vol"].to_numpy()
+            if not np.all(np.diff(v) <= 1e-6):
+                problems.append("ORB results not sorted by session_dollar_vol")
+        print(f"matches: {len(hits)}  (ranked by session_dollar_vol)")
+        if len(hits):
+            print(hits.round(2).to_string())
+        else:
+            print("  (no opening-range breakouts right now, or intraday data "
+                  "unavailable from Yahoo — valid)")
+        if problems:
+            total_fail += len(problems)
+            print("\nRESULT: ❌ FAIL")
+            for p in problems:
+                print("   -", p)
+        else:
+            print("\nRESULT: ✅ PASS  (all hits broke their opening range, ranking ok)")
+    except Exception as e:
+        # Intraday data can be rate-limited/unavailable; report without hard-failing.
+        print(f"  intraday ORB data unavailable from Yahoo right now ({e!r}); "
+              "logic is covered by the offline test suite.")
     print()
 
     print("=" * 74)
