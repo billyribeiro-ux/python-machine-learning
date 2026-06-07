@@ -111,6 +111,55 @@ shap.summary_plot(shap_values, X.iloc[-500:])        # beeswarm of feature impac
 # A feature with huge, one-sided SHAP that "shouldn't" matter is a leak red flag.</textarea>
         </div>
 
+        <h2>3b. Walk-forward: every prediction out-of-sample</h2>
+        <p>
+          A single train/test split gives one number on one regime. The
+          principal-engineer standard is <strong>walk-forward</strong>: retrain as
+          time advances and predict only the next untouched block, so the
+          concatenated predictions span the whole history and are each genuinely
+          out-of-sample. We <em>purge</em> bars whose labels overlap the test
+          block and <em>embargo</em> the bars right after it. One call does it,
+          for any model backend:
+        </p>
+        <div class="code-block" data-filename="code/honest_research.py">
+<textarea class="src">from sklearn.metrics import roc_auc_score
+from quantlab.data import get_provider
+from quantlab.ml import (assemble_dataset, triple_barrier_labels,
+                         walk_forward_predict, oos_signal)
+from quantlab.backtest import backtest_signal
+
+df = get_provider("yahoo").get_ohlcv("QQQ", start="2008-01-01")
+close = df["close"]
+lab = triple_barrier_labels(close, horizon=10, upper=2.0, lower=2.0)
+y = (lab["label"] > 0).astype(float).where(lab["label"].notna())
+X, y = assemble_dataset(df, y)
+
+for kind in ["logistic", "xgboost", "lightgbm"]:
+    proba = walk_forward_predict(X, y, kind=kind, n_splits=5, label_horizon=10)
+    m = proba.notna()                                   # OOS region
+    auc = roc_auc_score(y[m], proba[m])
+    sig = oos_signal(proba, long_th=0.55)               # confidence-gated
+    s = backtest_signal(close.loc[sig.index], sig, fee_bps=1.0)["stats"]
+    print(f"{kind:9s} OOS AUC={auc:.3f}  ret={s['total_return']:.1%}  "
+          f"Sharpe={s['sharpe']:.2f}")</textarea>
+        </div>
+        <p class="output-label">Out-of-sample (numbers vary)</p>
+        <div class="output">logistic  OOS AUC=0.536  ret=107.4%  Sharpe=0.53
+xgboost   OOS AUC=0.540  ret=270.9%  Sharpe=0.73
+lightgbm  OOS AUC=0.528  ret=209.4%  Sharpe=0.59</div>
+        <div class="callout better">
+          <div class="callout-title">🧱 Causality is tested, not assumed</div>
+          <p>
+            <code>walk_forward_predict</code> trains each fold only on data
+            strictly before the block it predicts. We <em>prove</em> it: a unit
+            test corrupts the future labels and asserts the early out-of-sample
+            predictions don't move (if they did, the loop would be peeking). This
+            is the engine behind the Streamlit <strong>ML</strong> page (Module
+            16), and optional isotonic <em>calibration</em> makes the
+            probabilities safe to threshold into position sizes.
+          </p>
+        </div>
+
         <h2>4. Predictions to positions</h2>
         <p>
           A classifier outputs P(up). Turning that into a position is a separate

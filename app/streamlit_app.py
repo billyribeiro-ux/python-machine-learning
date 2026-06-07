@@ -5,9 +5,11 @@ QuantLab Streamlit dashboard (Module 16)
 A single app that ties the whole course together:
 
   • Custom Strategy — build ANY indicator strategy on ANY timeframe and test it
-  • Backtester     — tune the multi-indicator combo live and see equity + stats
-  • Scanner        — rank a universe for swing / momentum / RS / gap / breakout
-  • Indicators     — chart price with indicators from the registry
+  • Optimize        — honest Optuna search (hold-out + Deflated Sharpe)
+  • ML              — walk-forward XGBoost/LightGBM, OOS predictions -> PnL
+  • Backtester      — tune the multi-indicator combo live and see equity + stats
+  • Scanner         — rank a universe for swing / momentum / RS / gap / breakout
+  • Indicators      — chart price with indicators from the registry
 
 Run:  streamlit run app/streamlit_app.py
 
@@ -31,7 +33,19 @@ from quantlab.backtest import (
     parse_indicator_specs,
     run_strategy,
 )
+from quantlab.backtest import backtest_signal
 from quantlab.backtest.stats import drawdown_series, equity_curve
+from quantlab.research import optimize_strategy
+from quantlab.research.templates import TEMPLATES
+from quantlab.ml import (
+    assemble_dataset,
+    feature_importances,
+    fit_full_model,
+    make_features,
+    oos_signal,
+    triple_barrier_labels,
+    walk_forward_predict,
+)
 from quantlab.scanners import (
     gap_up,
     momentum_breakout,
@@ -55,7 +69,8 @@ def load(symbol: str, start, timeframe: str) -> pd.DataFrame:
 
 st.sidebar.title("QuantLab")
 page = st.sidebar.radio(
-    "Page", ["Custom Strategy", "Backtester", "Scanner", "Indicators"]
+    "Page", ["Custom Strategy", "Optimize", "ML", "Backtester", "Scanner",
+             "Indicators"]
 )
 
 DEFAULT_UNIVERSE = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "META",
@@ -134,6 +149,133 @@ if page == "Custom Strategy":
             st.area_chart(drawdown_series(res["returns"]).rename("drawdown"))
             st.subheader("Recent positions")
             st.dataframe(res["signal"].rename("position").tail(20).to_frame())
+
+
+# --------------------------------------------------------------------------- #
+elif page == "Optimize":
+    st.header("Honest Strategy Optimizer")
+    st.caption("Optuna search with a held-out test period and the Deflated "
+               "Sharpe Ratio — so the 'best' result has to beat what luck alone "
+               "would produce across all the trials you ran.")
+
+    c1, c2, c3, c4 = st.columns(4)
+    symbol = c1.text_input("Symbol", "SPY")
+    start = c2.text_input("Start date", "2008-01-01")
+    template_name = c3.selectbox("Strategy template", list(TEMPLATES))
+    n_trials = c4.slider("Trials", 10, 150, 40, 10)
+
+    d1, d2, d3, d4 = st.columns(4)
+    holdout = d1.slider("Hold-out fraction", 0.1, 0.5, 0.25, 0.05)
+    n_folds = d2.slider("Robustness folds", 2, 8, 4)
+    multiobjective = d3.checkbox("Multi-objective (Sharpe vs drawdown)")
+    fee = d4.number_input("Fee (bps)", 0.0, 50.0, 1.0)
+
+    if st.button("Optimize", type="primary"):
+        build, space, invalid = TEMPLATES[template_name]
+        # bake the fee into the template via a wrapper
+        def build_fee(params, _b=build, _f=float(fee)):
+            cfg = _b(params); cfg.fee_bps = _f; return cfg
+        try:
+            with st.spinner(f"Running {n_trials} trials with hold-out validation..."):
+                ohlcv = load(symbol, start, "1d")
+                res = optimize_strategy(
+                    ohlcv, build_fee, space, invalid=invalid, n_trials=int(n_trials),
+                    holdout=float(holdout), n_folds=int(n_folds),
+                    multiobjective=multiobjective)
+        except Exception as exc:
+            st.error(f"Optimization failed: {exc}")
+        else:
+            st.subheader("Best parameters")
+            st.json({k: (round(v, 3) if isinstance(v, float) else v)
+                     for k, v in res.best_params.items()})
+
+            tr, ho = res.train_stats, res.holdout_stats
+            cols = st.columns(4)
+            cols[0].metric("Train Sharpe (in-sample)", f"{tr['sharpe']:.2f}")
+            cols[1].metric("Hold-out Sharpe (OOS)", f"{ho['sharpe']:.2f}",
+                           delta=f"{-res.is_oos_gap:.2f} vs IS")
+            cols[2].metric("Deflated Sharpe", f"{res.deflated_sharpe:.2f}")
+            cols[3].metric("Hold-out max DD", f"{ho['max_drawdown']:.1%}")
+
+            verdict = ("✅ Trustworthy — beats the luck threshold and holds out of "
+                       "sample." if res.trustworthy else
+                       "⚠️ Treat with skepticism — likely overfit (low deflated "
+                       "Sharpe or large in-sample→out-of-sample gap).")
+            (st.success if res.trustworthy else st.warning)(verdict)
+
+            st.caption(f"Per-fold train Sharpes (robustness across regimes): "
+                       f"{[round(f, 2) for f in res.fold_sharpes]}  ·  "
+                       f"{res.n_trials} completed trials")
+
+            st.subheader("Hold-out equity curve (the honest result)")
+            st.line_chart(equity_curve(res.holdout_returns).rename("hold-out equity"))
+
+            if res.history:
+                st.subheader("Optimization progress (best objective so far)")
+                st.line_chart(pd.Series(res.history, name="best objective"))
+
+            if res.pareto:
+                st.subheader("Pareto front (Sharpe vs drawdown)")
+                st.dataframe(pd.DataFrame(res.pareto).head(10))
+
+
+# --------------------------------------------------------------------------- #
+elif page == "ML":
+    st.header("Walk-Forward Machine Learning")
+    st.caption("Purged, out-of-sample predictions (no peeking), evaluated by "
+               "PnL — not accuracy. AUC near 0.5 is normal and honest.")
+
+    c1, c2, c3, c4 = st.columns(4)
+    symbol = c1.text_input("Symbol", "QQQ")
+    start = c2.text_input("Start date", "2008-01-01")
+    kind = c3.selectbox("Model", ["logistic", "xgboost", "lightgbm"])
+    n_splits = c4.slider("Walk-forward folds", 3, 10, 5)
+
+    d1, d2, d3, d4 = st.columns(4)
+    horizon = d1.slider("Label horizon (bars)", 3, 30, 10)
+    barrier = d2.slider("Barrier (× vol)", 1.0, 4.0, 2.0, 0.5)
+    long_th = d3.slider("Long threshold", 0.50, 0.70, 0.55, 0.01)
+    fee = d4.number_input("Fee (bps)", 0.0, 50.0, 1.0)
+
+    if st.button("Train & backtest", type="primary"):
+        try:
+            with st.spinner("Building features, labeling, walk-forward training..."):
+                df = load(symbol, start, "1d")
+                close = df["close"]
+                lab = triple_barrier_labels(close, horizon=int(horizon),
+                                            upper=float(barrier), lower=float(barrier))
+                y = (lab["label"] > 0).astype(float).where(lab["label"].notna())
+                X, y = assemble_dataset(df, y)
+                proba = walk_forward_predict(X, y, kind=kind, n_splits=int(n_splits),
+                                             embargo=0.01, label_horizon=int(horizon))
+                sig = oos_signal(proba, long_th=float(long_th))
+                bt = backtest_signal(close.loc[sig.index], sig, fee_bps=float(fee))
+        except Exception as exc:
+            st.error(f"Training failed: {exc}")
+        else:
+            from sklearn.metrics import roc_auc_score
+            mask = proba.notna()
+            auc = (roc_auc_score(y[mask], proba[mask])
+                   if mask.any() and y[mask].nunique() > 1 else float("nan"))
+            s = bt["stats"]
+            m = st.columns(5)
+            m[0].metric("OOS AUC", f"{auc:.3f}")
+            m[1].metric("OOS return", f"{s['total_return']:.1%}")
+            m[2].metric("OOS Sharpe", f"{s['sharpe']:.2f}")
+            m[3].metric("Max DD", f"{s['max_drawdown']:.1%}")
+            m[4].metric("Bars traded", f"{int(mask.sum())}")
+
+            st.subheader("Out-of-sample equity curve")
+            st.line_chart(pd.DataFrame({
+                "ML strategy": equity_curve(bt["returns"]),
+                "buy & hold": equity_curve(close.loc[sig.index].pct_change()),
+            }))
+
+            st.subheader("Feature importance (model fit on full history)")
+            model = fit_full_model(X, y, kind=kind)
+            st.bar_chart(feature_importances(model, X.columns))
+            st.caption("AUC ≈ 0.52–0.56 on liquid daily data is a realistic edge. "
+                       "Beware anyone reporting 0.9 — that's almost always leakage.")
 
 
 # --------------------------------------------------------------------------- #

@@ -23,6 +23,7 @@ numba>=0.59
 quantstats>=0.0.62
 
 # --- machine learning ---
+scipy>=1.11             # deflated/probabilistic Sharpe + options pricing
 scikit-learn>=1.4
 xgboost>=2.0
 lightgbm>=4.3

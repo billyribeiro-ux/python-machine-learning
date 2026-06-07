@@ -127,14 +127,72 @@ Pareto front (top 5 by Sharpe):
           </p>
         </div>
 
+        <h2>5. The honest optimizer: hold-out + Deflated Sharpe</h2>
+        <p>
+          We packaged the entire discipline into one function,
+          <code>quantlab.research.optimize_strategy</code>, so you never have to
+          remember to do it by hand. It optimizes any
+          <a href="#"><code>research.templates</code></a> strategy and returns a
+          result you can <em>trust or distrust on sight</em>:
+        </p>
+        <ul>
+          <li><strong>Hold-out discipline</strong> — the series is split
+            chronologically; the optimizer only ever sees the train portion, and
+            the reported edge is the untouched hold-out.</li>
+          <li><strong>Robust objective</strong> — it maximizes the mean
+            <em>minus</em> the spread of per-fold Sharpes, rewarding strategies
+            that work across regimes rather than one lucky stretch.</li>
+          <li><strong>Deflated Sharpe Ratio</strong> — given how many trials you
+            ran, how likely is this hold-out Sharpe to be more than luck? This is
+            the number that survives review.</li>
+        </ul>
+        <div class="code-block" data-filename="code/honest_research.py">
+<textarea class="src">from quantlab.data import get_provider
+from quantlab.research import optimize_strategy
+from quantlab.research.templates import TEMPLATES
+
+ohlcv = get_provider("yahoo").get_ohlcv("SPY", start="2008-01-01")
+build, space, invalid = TEMPLATES["trend_pullback"]
+
+res = optimize_strategy(ohlcv, build, space, invalid=invalid,
+                        n_trials=60, holdout=0.25, n_folds=4)
+
+print("best params :", res.best_params)
+print("train  Sharpe:", round(res.train_stats["sharpe"], 2))
+print("HOLD-OUT Sharpe (honest):", round(res.holdout_stats["sharpe"], 2))
+print("IS -> OOS gap:", round(res.is_oos_gap, 2))
+print("Deflated Sharpe:", round(res.deflated_sharpe, 3))
+print("verdict:", "TRUSTWORTHY" if res.trustworthy else "LIKELY OVERFIT")</textarea>
+        </div>
+        <p class="output-label">A real run flags itself as overfit — which is the point</p>
+        <div class="output">train  Sharpe: 0.67
+HOLD-OUT Sharpe (honest): -0.20
+IS -> OOS gap: 0.87
+Deflated Sharpe (60 trials): 0.087
+verdict: LIKELY OVERFIT</div>
+        <div class="callout better">
+          <div class="callout-title">🧱 A framework that refuses to lie to you</div>
+          <p>
+            A naive search would have reported "Sharpe 0.67!" and moved on. Ours
+            shows the hold-out Sharpe is actually <em>negative</em> and the
+            Deflated Sharpe is 0.09 — i.e. this result is exactly what luck
+            produces across 60 trials. The most valuable thing a research tool can
+            do is tell you when <em>not</em> to trade. This is wired into the
+            Streamlit <strong>Optimize</strong> page (Module 16) with a live
+            trustworthy/over-fit verdict, the hold-out equity curve, and the
+            Pareto front.
+          </p>
+        </div>
+
         <div class="callout tryit">
           <div class="callout-title">🛠️ Try it</div>
           <p>
-            Split SPY into 2010–2018 (train) and 2019–today (test). Run
-            <code>optimize_combo</code> on the train slice, then evaluate
-            <code>run_combo(test_close, ComboParams(**study.best_params))</code>
-            on the untouched test slice. Compare in-sample vs out-of-sample
-            Sharpe — the gap is your overfitting tax, and seeing it is the lesson.
+            Run <code>code/honest_research.py</code>, then raise
+            <code>n_trials</code> from 60 to 400 and watch the <em>Deflated
+            Sharpe fall</em> even if the raw best Sharpe rises — more searching
+            makes the same result less believable. Then widen the hold-out to 0.4
+            and see how the in-sample→out-of-sample gap behaves. Internalizing
+            this relationship is what separates a quant from a curve-fitter.
           </p>
         </div>
 
