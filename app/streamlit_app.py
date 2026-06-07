@@ -35,7 +35,11 @@ from quantlab.backtest import (
 )
 from quantlab.backtest import backtest_signal
 from quantlab.backtest.stats import drawdown_series, equity_curve
-from quantlab.research import optimize_strategy
+from quantlab.research import (
+    cpcv_sharpe_distribution,
+    optimize_strategy,
+    pbo_for_template,
+)
 from quantlab.research.templates import TEMPLATES
 from quantlab.ml import (
     assemble_dataset,
@@ -69,8 +73,8 @@ def load(symbol: str, start, timeframe: str) -> pd.DataFrame:
 
 st.sidebar.title("QuantLab")
 page = st.sidebar.radio(
-    "Page", ["Custom Strategy", "Optimize", "ML", "Backtester", "Scanner",
-             "Indicators"]
+    "Page", ["Custom Strategy", "Optimize", "Overfitting", "ML", "Backtester",
+             "Scanner", "Indicators"]
 )
 
 DEFAULT_UNIVERSE = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "META",
@@ -217,6 +221,78 @@ elif page == "Optimize":
             if res.pareto:
                 st.subheader("Pareto front (Sharpe vs drawdown)")
                 st.dataframe(pd.DataFrame(res.pareto).head(10))
+
+
+# --------------------------------------------------------------------------- #
+elif page == "Overfitting":
+    st.header("Overfitting Diagnostics — PBO &amp; CPCV")
+    st.caption("The capstone test (Bailey & López de Prado): across thousands of "
+               "symmetric train/test recombinations, how often is the in-sample "
+               "best no better than the median out of sample? That fraction is "
+               "the Probability of Backtest Overfitting.")
+
+    c1, c2, c3, c4 = st.columns(4)
+    symbol = c1.text_input("Symbol", "SPY")
+    start = c2.text_input("Start date", "2008-01-01")
+    template_name = c3.selectbox("Strategy template", list(TEMPLATES))
+    n_configs = c4.slider("Configurations", 10, 80, 40, 5)
+
+    s_blocks = st.select_slider("CSCV blocks (S, even)", options=[6, 8, 10, 12, 14],
+                                value=10)
+
+    if st.button("Assess overfitting", type="primary"):
+        build, space, invalid = TEMPLATES[template_name]
+        try:
+            with st.spinner(f"Backtesting {n_configs} configs and running "
+                            f"C({s_blocks},{s_blocks // 2}) CSCV splits..."):
+                ohlcv = load(symbol, start, "1d")
+                res = pbo_for_template(ohlcv, build, space, invalid=invalid,
+                                       n_configs=int(n_configs), s_blocks=int(s_blocks))
+        except Exception as exc:
+            st.error(f"PBO assessment failed: {exc}")
+        else:
+            m = st.columns(4)
+            m[0].metric("PBO", f"{res.pbo:.1%}", help="Lower is better; ~50% means "
+                        "selection is no better than chance.")
+            m[1].metric("P(out-of-sample loss)", f"{res.prob_oos_loss:.1%}")
+            m[2].metric("Perf. degradation slope", f"{res.degradation_slope:.2f}",
+                        help="OOS-on-IS slope; near 1 is healthy, <=0 is bad.")
+            m[3].metric("CSCV splits", f"{res.n_splits:,}")
+
+            if res.pbo <= 0.2:
+                st.success("✅ " + res.verdict)
+            elif res.pbo <= 0.5:
+                st.warning("⚠️ " + res.verdict)
+            else:
+                st.error("⛔ " + res.verdict)
+
+            # Logit distribution: overfitting pushes mass below zero.
+            st.subheader("Distribution of logits λ  (mass below 0 = overfitting)")
+            counts, edges = np.histogram(res.logits, bins=25)
+            centers = (edges[:-1] + edges[1:]) / 2
+            st.bar_chart(pd.DataFrame({"count": counts},
+                                      index=np.round(centers, 2)))
+
+            # In-sample vs out-of-sample performance of the selected configs.
+            st.subheader("Selected config: in-sample vs out-of-sample")
+            st.scatter_chart(pd.DataFrame({
+                "in_sample": res.is_performance,
+                "out_of_sample": res.oos_performance,
+            }), x="in_sample", y="out_of_sample")
+
+            # CPCV path distribution for a representative (median-Sharpe) config.
+            st.subheader("CPCV out-of-sample Sharpe distribution (robustness fan)")
+            from quantlab.backtest import backtest_signal, build_signal
+            from quantlab.research.pbo import sample_param_sets
+            sets = sample_param_sets(space, 1, invalid=invalid, seed=7)
+            cfg = build(sets[0])
+            rets = backtest_signal(ohlcv["close"], build_signal(ohlcv, cfg))["returns"]
+            dist = cpcv_sharpe_distribution(rets, n_groups=10, n_test_groups=2)
+            st.caption(f"median={np.median(dist):.2f} · 5th pct (bad luck)="
+                       f"{np.percentile(dist, 5):.2f} · worst={dist.min():.2f}")
+            counts, edges = np.histogram(dist, bins=20)
+            centers = (edges[:-1] + edges[1:]) / 2
+            st.bar_chart(pd.DataFrame({"paths": counts}, index=np.round(centers, 2)))
 
 
 # --------------------------------------------------------------------------- #

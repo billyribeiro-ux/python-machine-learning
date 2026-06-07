@@ -55,3 +55,26 @@ for kind in ["logistic", "xgboost", "lightgbm"]:
           f"Sharpe={s['sharpe']:.2f}")
 print("\nAUC ~0.5 is honest — markets are hard. Edge shows up in PnL with "
       "confidence-gated sizing, not in a flashy accuracy number.")
+
+# ----- 3) Capstone: Probability of Backtest Overfitting (CSCV) + CPCV ------
+import numpy as np
+from quantlab.research import pbo_for_template, cpcv_sharpe_distribution
+from quantlab.backtest import build_signal, backtest_signal
+from quantlab.research.templates import trend_pullback
+
+print("\n=== Probability of Backtest Overfitting (trend_pullback on SPY) ===")
+pbo = pbo_for_template(ohlcv, build, space, invalid=invalid, n_configs=40, s_blocks=10)
+print(f"PBO = {pbo.pbo:.1%}  (lower is better; ~50% = selection is luck)")
+print(f"P(out-of-sample loss) = {pbo.prob_oos_loss:.1%}  "
+      f"degradation slope = {pbo.degradation_slope:.2f}")
+print("verdict:", pbo.verdict)
+
+print("\n=== CPCV: distribution of out-of-sample Sharpe across paths ===")
+cfg = trend_pullback({"fast": 20, "slow": 150, "rsi_w": 14,
+                      "rsi_floor": 40, "z_w": 20, "z_entry": 0.5})
+rets = backtest_signal(ohlcv["close"], build_signal(ohlcv, cfg))["returns"]
+dist = cpcv_sharpe_distribution(rets, n_groups=10, n_test_groups=2)
+print(f"OOS Sharpe across {len(dist)} paths: median={np.median(dist):.2f}  "
+      f"5th pct (bad luck)={np.percentile(dist, 5):.2f}  worst={dist.min():.2f}")
+print("\nJudge a strategy by its bad paths, not its average. PBO is the final "
+      "gate before risking real capital.")

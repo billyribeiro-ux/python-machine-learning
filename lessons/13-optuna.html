@@ -113,6 +113,76 @@ Pareto front (top 5 by Sharpe):
           </p>
         </div>
 
+        <h2>6. Capstone: CPCV &amp; the Probability of Backtest Overfitting</h2>
+        <p>
+          A hold-out is one cut of history; a clever search can still get lucky on
+          it. The gold standard (Bailey, Borwein, López de Prado &amp; Zhu) asks a
+          deeper question across <em>many</em> symmetric recombinations of train
+          and test: <strong>how often is the in-sample best config no better than
+          the median out of sample?</strong> That fraction is the
+          <strong>Probability of Backtest Overfitting (PBO)</strong>, computed by
+          <strong>Combinatorially Symmetric Cross-Validation (CSCV)</strong>.
+        </p>
+        <div class="code-block" data-filename="pbo_capstone.py">
+<textarea class="src">from quantlab.data import get_provider
+from quantlab.research import pbo_for_template
+from quantlab.research.templates import TEMPLATES
+
+ohlcv = get_provider("yahoo").get_ohlcv("SPY", start="2008-01-01")
+build, space, invalid = TEMPLATES["trend_pullback"]
+
+# Backtest 40 random configs, then run C(10,5)=252 symmetric train/test splits.
+res = pbo_for_template(ohlcv, build, space, invalid=invalid,
+                       n_configs=40, s_blocks=10)
+print(f"PBO = {res.pbo:.1%}            # P(in-sample winner is below OOS median)")
+print(f"P(OOS loss) = {res.prob_oos_loss:.1%}")
+print(f"degradation slope = {res.degradation_slope:.2f}  # OOS-on-IS; want ~1")
+print("verdict:", res.verdict)</textarea>
+        </div>
+        <div class="callout deepdive">
+          <div class="callout-title">🔬 How to read PBO (validated on known truth)</div>
+          <p>
+            We tested the estimator against ground truth: a basket of pure-noise
+            configs yields <strong>PBO ≈ 0.5</strong> (selection is luck), while a
+            genuinely dominant config yields <strong>PBO ≈ 0.0</strong> (the winner
+            stays best out of sample). So: <strong>PBO near 0</strong> = the search
+            is finding real edge; <strong>PBO near 0.5+</strong> = your "best"
+            strategy is probably a curve-fit. Pair it with the <strong>performance
+            degradation</strong> slope (OOS regressed on IS — you want it positive
+            and near 1, not negative).
+          </p>
+        </div>
+        <p>
+          Its companion, <strong>Combinatorial Purged CV</strong>
+          (<code>CombinatorialPurgedCV</code>), tests on every combination of
+          <em>k</em> groups at once to reconstruct
+          <code>φ = k·C(N,k)/N</code> distinct backtest <em>paths</em> — turning a
+          single Sharpe into a <em>distribution</em>. Judge a strategy by its bad
+          paths, not its average:
+        </p>
+        <div class="code-block" data-filename="cpcv_paths.py">
+<textarea class="src">import numpy as np
+from quantlab.research import cpcv_sharpe_distribution
+from quantlab.backtest import build_signal, backtest_signal
+from quantlab.research.templates import trend_pullback
+
+cfg = trend_pullback({"fast":20,"slow":150,"rsi_w":14,"rsi_floor":40,"z_w":20,"z_entry":0.5})
+rets = backtest_signal(ohlcv["close"], build_signal(ohlcv, cfg))["returns"]
+dist = cpcv_sharpe_distribution(rets, n_groups=10, n_test_groups=2)   # C(10,2)=45 paths
+print(f"median Sharpe={np.median(dist):.2f}  5th-pct (bad luck)={np.percentile(dist,5):.2f}")</textarea>
+        </div>
+        <div class="callout better">
+          <div class="callout-title">🧱 The Overfitting page</div>
+          <p>
+            Both live on the Streamlit <strong>Overfitting</strong> page (Module
+            16): PBO with a red/amber/green verdict, the logit distribution (mass
+            below zero is overfitting), an in-sample-vs-out-of-sample scatter, and
+            the CPCV Sharpe fan. This is the final gate before you'd ever risk
+            capital — and it's all in <code>quantlab.research</code>, tested
+            against synthetic ground truth.
+          </p>
+        </div>
+
         <div class="callout pitfall">
           <div class="callout-title">⚠️ Optimization is overfitting with extra steps</div>
           <p>

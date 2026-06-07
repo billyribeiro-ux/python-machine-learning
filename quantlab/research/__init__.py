@@ -14,13 +14,29 @@ from .metrics import (
     probabilistic_sharpe_ratio,
     returns_skew_kurt,
 )
+from .cpcv import CombinatorialPurgedCV, cpcv_sharpe_distribution
 from .optimize import OptimizeResult, optimize_strategy
+from .pbo import (
+    PBOResult,
+    cscv_pbo,
+    pbo_for_template,
+    returns_matrix,
+    sample_param_sets,
+)
 from .templates import TEMPLATES
 from .walkforward import chronological_split, fold_sharpes, split_index
 
 __all__ = [
     "optimize_strategy",
     "OptimizeResult",
+    # combinatorial purged CV + probability of backtest overfitting (capstone)
+    "CombinatorialPurgedCV",
+    "cpcv_sharpe_distribution",
+    "cscv_pbo",
+    "pbo_for_template",
+    "returns_matrix",
+    "sample_param_sets",
+    "PBOResult",
     "TEMPLATES",
     "chronological_split",
     "fold_sharpes",
