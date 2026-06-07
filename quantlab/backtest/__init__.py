@@ -12,6 +12,7 @@ from .strategy import (
     StrategyConfig,
     available_indicators,
     build_signal,
+    parse_indicator_specs,
     run_strategy,
     run_strategy_multi,
 )
@@ -36,6 +37,7 @@ __all__ = [
     "run_strategy_multi",
     "build_signal",
     "available_indicators",
+    "parse_indicator_specs",
     # stats
     "compute_stats",
     "equity_curve",

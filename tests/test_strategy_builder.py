@@ -136,3 +136,44 @@ def test_run_strategy_multi_portfolio(provider):
 def test_available_indicators_lists_registry():
     names = available_indicators()
     assert {"sma", "rsi", "zscore", "atr"} <= set(names)
+
+
+# --------------------------------------------------------------------------- #
+# parse_indicator_specs — the parser the Streamlit "Custom Strategy" page uses
+# --------------------------------------------------------------------------- #
+def test_parse_specs_basic():
+    from quantlab.backtest import parse_indicator_specs
+
+    specs, cols, errors = parse_indicator_specs("sma:50\nrsi:14\nzscore:20")
+    assert specs == [("sma", {"window": 50}), ("rsi", {"window": 14}),
+                     ("zscore", {"window": 20})]
+    assert cols == ["sma_50", "rsi_14", "zscore_20"]
+    assert errors == []
+
+
+def test_parse_specs_defaults_and_blanks():
+    from quantlab.backtest import parse_indicator_specs
+
+    specs, cols, errors = parse_indicator_specs("rsi\n\n  \nsma:")
+    # blank value -> indicator default (rsi_14, sma_20); blank lines ignored.
+    assert specs == [("rsi", {"window": 14}), ("sma", {"window": 20})]
+    assert cols == ["rsi_14", "sma_20"]
+    assert errors == []
+
+
+def test_parse_specs_reports_unknown():
+    from quantlab.backtest import parse_indicator_specs
+
+    specs, cols, errors = parse_indicator_specs("sma:50\nbogus:5")
+    assert specs == [("sma", {"window": 50})]      # good one kept
+    assert len(errors) == 1 and "bogus" in errors[0]
+
+
+def test_parsed_specs_feed_the_builder(provider):
+    """The parser output must plug straight into a StrategyConfig and run."""
+    from quantlab.backtest import parse_indicator_specs
+
+    specs, cols, _ = parse_indicator_specs("sma:20\nsma:50")
+    cfg = StrategyConfig(indicators=specs, rule=f"{cols[0]} > {cols[1]}")
+    res = run_strategy(provider, "TEST", cfg, start="2018-01-01")
+    assert "sharpe" in res["stats"]

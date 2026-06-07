@@ -4,9 +4,10 @@ QuantLab Streamlit dashboard (Module 16)
 
 A single app that ties the whole course together:
 
-  • Scanner       — rank a universe for swing / momentum setups
-  • Backtester    — tune the multi-indicator combo live and see equity + stats
-  • Indicators    — chart price with indicators from the registry
+  • Custom Strategy — build ANY indicator strategy on ANY timeframe and test it
+  • Backtester     — tune the multi-indicator combo live and see equity + stats
+  • Scanner        — rank a universe for swing / momentum / RS / gap / breakout
+  • Indicators     — chart price with indicators from the registry
 
 Run:  streamlit run app/streamlit_app.py
 
@@ -22,28 +23,121 @@ import pandas as pd
 import streamlit as st
 
 from quantlab.data import get_provider
-from quantlab.indicators import combine, sma, supertrend
+from quantlab.indicators import combine, supertrend
 from quantlab.strategies import ComboParams, run_combo
-from quantlab.backtest.stats import equity_curve, drawdown_series
-from quantlab.scanners import scan, swing_pullback, momentum_breakout
+from quantlab.backtest import (
+    StrategyConfig,
+    available_indicators,
+    parse_indicator_specs,
+    run_strategy,
+)
+from quantlab.backtest.stats import drawdown_series, equity_curve
+from quantlab.scanners import (
+    gap_up,
+    momentum_breakout,
+    new_high_breakout,
+    orb_scan,
+    relative_strength,
+    scan,
+    swing_pullback,
+)
 
 st.set_page_config(page_title="QuantLab", layout="wide")
 
-# st.cache_data memoizes the network fetch so sliders don't re-download data.
+INTRADAY = {"1h", "60m", "30m", "15m", "5m", "1m"}
+
+
 @st.cache_data(show_spinner=False)
-def load(symbol: str, start: str, timeframe: str) -> pd.DataFrame:
+def load(symbol: str, start, timeframe: str) -> pd.DataFrame:
+    """Cached fetch so widgets don't re-download data on every interaction."""
     return get_provider("yahoo").get_ohlcv(symbol, start=start, timeframe=timeframe)
 
 
 st.sidebar.title("QuantLab")
-page = st.sidebar.radio("Page", ["Backtester", "Scanner", "Indicators"])
+page = st.sidebar.radio(
+    "Page", ["Custom Strategy", "Backtester", "Scanner", "Indicators"]
+)
 
 DEFAULT_UNIVERSE = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "META",
                     "GOOGL", "JPM", "XOM", "WMT", "KO", "TSLA", "AVGO", "COST"]
 
 
 # --------------------------------------------------------------------------- #
-if page == "Backtester":
+if page == "Custom Strategy":
+    st.header("Custom Strategy Builder")
+    st.caption("Declare any indicators + rules, on any symbol and timeframe — "
+               "backtested leak-free (decide on bar t, act on t+1).")
+
+    c1, c2, c3, c4 = st.columns(4)
+    symbol = c1.text_input("Symbol", "SPY")
+    start = c2.text_input("Start date", "2010-01-01")
+    timeframe = c3.selectbox("Timeframe", ["1d", "1wk", "1h", "30m", "15m", "5m"])
+    fee = c4.number_input("Fee (bps)", 0.0, 50.0, 1.0)
+
+    cc1, cc2 = st.columns([1, 2])
+    direction = cc1.radio("Direction", ["long", "short"], horizontal=True)
+    specs_text = cc2.text_area(
+        "Indicators (one per line, `name:value`)",
+        "sma:50\nsma:200\nrsi:14",
+        height=110,
+    )
+    specs, cols, spec_errors = parse_indicator_specs(specs_text)
+    for e in spec_errors:
+        st.warning(e)
+    st.caption(f"Available indicators: {available_indicators()}")
+    if cols:
+        st.caption(f"Columns you can reference in rules: "
+                   f"`{'`, `'.join(cols)}`, plus `open/high/low/close/volume`")
+
+    mode = st.radio("Logic", ["rule (hold while true)", "entry / exit"],
+                    horizontal=True)
+    if mode.startswith("rule"):
+        rule = st.text_input("Rule", "sma_50 > sma_200")
+        entry = exit_ = None
+    else:
+        rule = None
+        e1, e2 = st.columns(2)
+        entry = e1.text_input("Entry when", "(rsi_14 < 35) & (close > sma_200)")
+        exit_ = e2.text_input("Exit when", "rsi_14 > 65")
+
+    st.caption("Combine conditions with `&` `|` `~` (vectorized) — not "
+               "`and`/`or`/`not`.")
+
+    if st.button("Run backtest", type="primary"):
+        cfg = StrategyConfig(indicators=specs, rule=rule, entry=entry, exit=exit_,
+                             direction=direction, fee_bps=float(fee), name="dashboard")
+        start_arg = None if timeframe in INTRADAY else start
+        try:
+            with st.spinner("Backtesting..."):
+                res = run_strategy(get_provider("yahoo"), symbol, cfg,
+                                   start=start_arg, timeframe=timeframe)
+                bench = load(symbol, start_arg, timeframe)["close"].pct_change()
+        except Exception as exc:  # surface a friendly error, don't crash the app
+            st.error(f"Could not run this strategy: {exc}")
+        else:
+            s = res["stats"]
+            m = st.columns(6)
+            m[0].metric("Total return", f"{s['total_return']:.1%}")
+            m[1].metric("CAGR", f"{s['cagr']:.1%}")
+            m[2].metric("Sharpe", f"{s['sharpe']:.2f}")
+            m[3].metric("Sortino", f"{s['sortino']:.2f}")
+            m[4].metric("Max DD", f"{s['max_drawdown']:.1%}")
+            m[5].metric("Win rate", f"{s['win_rate']:.1%}")
+            st.caption(f"≈ {int(res['turnover']) // 2} round-trip trades · "
+                       f"timeframe {res['timeframe']}")
+
+            eq = equity_curve(res["returns"])
+            st.subheader("Equity curve vs buy & hold")
+            st.line_chart(pd.DataFrame(
+                {"strategy": eq, "buy & hold": equity_curve(bench)}))
+            st.subheader("Drawdown")
+            st.area_chart(drawdown_series(res["returns"]).rename("drawdown"))
+            st.subheader("Recent positions")
+            st.dataframe(res["signal"].rename("position").tail(20).to_frame())
+
+
+# --------------------------------------------------------------------------- #
+elif page == "Backtester":
     st.header("Strategy Backtester — multi-indicator combo")
     c1, c2, c3 = st.columns(3)
     symbol = c1.text_input("Symbol", "SPY")
@@ -79,15 +173,29 @@ if page == "Backtester":
 # --------------------------------------------------------------------------- #
 elif page == "Scanner":
     st.header("Universe Scanner")
-    setup_name = st.selectbox("Setup", ["swing_pullback", "momentum_breakout"])
+    SNAPSHOT_SETUPS = {
+        "swing_pullback": swing_pullback,
+        "momentum_breakout": momentum_breakout,
+        "relative_strength": relative_strength,
+        "gap_up": gap_up,
+        "new_high_breakout": new_high_breakout,
+    }
+    setup_name = st.selectbox(
+        "Setup", list(SNAPSHOT_SETUPS) + ["opening_range_breakout (intraday)"])
     universe = st.text_area("Universe (comma-separated)",
                             ", ".join(DEFAULT_UNIVERSE)).replace(" ", "").split(",")
-    setup = {"swing_pullback": swing_pullback,
-             "momentum_breakout": momentum_breakout}[setup_name]
+
     with st.spinner("Scanning..."):
-        hits = scan(get_provider("yahoo"), universe, setup=setup, start="2022-01-01")
+        if setup_name.startswith("opening_range_breakout"):
+            hits = orb_scan(get_provider("yahoo"), universe, timeframe="5m")
+        else:
+            hits = scan(get_provider("yahoo"), universe,
+                        setup=SNAPSHOT_SETUPS[setup_name], start="2022-01-01")
     st.write(f"**{len(hits)}** matches")
-    st.dataframe(hits.style.format("{:.3f}"))
+    if len(hits):
+        st.dataframe(hits.style.format("{:.3f}"))
+    else:
+        st.info("No matches in the current market regime (a valid result).")
 
 
 # --------------------------------------------------------------------------- #

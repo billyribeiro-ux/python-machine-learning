@@ -84,6 +84,41 @@ def available_indicators() -> list[str]:
     return available()
 
 
+# Primary parameter name + default per registry indicator. Used by UIs (the
+# Streamlit dashboard) to turn simple "name:value" lines into proper specs and
+# to show the generated column names.
+INDICATOR_PARAM_KEY = {"sma": "window", "ewma": "span", "std": "window",
+                       "zscore": "window", "rsi": "window", "atr": "window",
+                       "ret": "periods"}
+INDICATOR_DEFAULTS = {"sma": 20, "ewma": 20, "std": 20, "zscore": 20,
+                      "rsi": 14, "atr": 14, "ret": 1}
+
+
+def parse_indicator_specs(text: str):
+    """Parse lines like ``"sma:50"`` / ``"rsi:14"`` into registry specs.
+
+    Returns ``(specs, columns, errors)`` where ``specs`` is the list of
+    ``(name, params)`` for :func:`combine`, ``columns`` are the generated column
+    names (e.g. ``sma_50``) to reference in rules, and ``errors`` lists any
+    unrecognized indicator names. A blank value uses the indicator's default.
+    """
+    specs, cols, errors = [], [], []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        name, _, val = line.partition(":")
+        name = name.strip().lower()
+        if name not in INDICATOR_PARAM_KEY:
+            errors.append(f"unknown indicator '{name}' "
+                          f"(have: {sorted(INDICATOR_PARAM_KEY)})")
+            continue
+        value = int(float(val)) if val.strip() else INDICATOR_DEFAULTS[name]
+        specs.append((name, {INDICATOR_PARAM_KEY[name]: value}))
+        cols.append(f"{name}_{value}")
+    return specs, cols, errors
+
+
 # --------------------------------------------------------------------------- #
 # Expression evaluation
 # --------------------------------------------------------------------------- #
