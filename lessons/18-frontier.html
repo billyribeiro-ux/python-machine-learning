@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QuantLab — The Frontier: World-Class Techniques</title>
+  <link rel="stylesheet" href="../assets/css/course.css" />
+</head>
+<body data-root="lessons" data-lesson-id="18-frontier">
+  <div class="layout">
+    <nav class="sidebar"></nav>
+    <main class="content">
+      <div class="content-inner">
+
+        <p class="eyebrow">Module 18 · The Frontier</p>
+        <h1>The Frontier: What Separates Good from World-Class</h1>
+        <p class="lead">
+          Everything before this module makes you a rigorous systematic trader.
+          This module covers the techniques used inside top quant shops that
+          almost no public course teaches — each implemented from first
+          principles in <code>quantlab/advanced/</code>, each tested against
+          processes whose right answer we control, and each carrying an honest
+          account of where it fails.
+        </p>
+        <div class="progress-pill" data-progress></div>
+
+        <h2>1. Fractional differentiation: stationarity without amnesia</h2>
+        <p>
+          Every ML pipeline in this course hit the same fork: train on
+          <em>prices</em> (non-stationary — the model chases a moving target) or
+          on <em>returns</em> (stationary — but differencing erased the level
+          information that carries most of the signal). Integer differencing
+          forces all-or-nothing. <strong>Fractional</strong> differencing —
+          applying the operator (1−B)<sup>d</sup> for a real-valued
+          <code>d ∈ (0,1)</code> — lets you difference <em>just enough</em> to
+          pass a stationarity test while keeping maximal memory. The operator
+          expands into weights <code>w₀=1, w_k = −w_{k−1}·(d−k+1)/k</code>; we
+          truncate them (fixed-width window) so the transform is strictly causal.
+        </p>
+        <div class="code-block" data-filename="fracdiff_demo.py">
+<textarea class="src">from quantlab.data import get_provider
+from quantlab.advanced import fracdiff, adf_tstat, min_fracdiff_order
+
+close = get_provider("yahoo").get_ohlcv("SPY", start="2010-01-01")["close"]
+
+# Raw prices fail the ADF stationarity test; returns pass but forget the level.
+print("ADF(prices) :", round(adf_tstat(close), 2), " (need < -2.86)")
+print("ADF(returns):", round(adf_tstat(close.pct_change().dropna()), 2))
+
+# Find the SMALLEST d that achieves stationarity — and see the memory you keep.
+d_star, table = min_fracdiff_order(close)
+print(f"minimal d* = {d_star}")
+print(table.round(3))     # columns: adf_t (falls with d), memory_corr (decays)
+
+x_tilde = fracdiff(close, d_star)   # a stationary feature that still remembers</textarea>
+        </div>
+        <p class="output-label">Measured on real SPY (2010–today)</p>
+        <div class="output">ADF(prices)  =   1.95   (stationary needs &lt; -2.86)
+ADF(returns) = -45.38
+minimal d* for stationarity: 0.3
+      adf_t  memory_corr
+0.0   1.949        1.000
+0.3  -3.121        0.977   &lt;- stationary AND keeps 97.7% of the level memory
+1.0 -45.143        0.047   &lt;- returns: stationary but amnesiac</div>
+        <div class="callout deepdive">
+          <div class="callout-title">🔬 Why this matters for every ML module</div>
+          <p>
+            On liquid equity series the minimal d is typically <strong>0.3–0.6</strong>
+            — and the fractionally-differenced series keeps a correlation of
+            0.95+ with the original levels, versus near-zero for returns. Feed
+            <code>fracdiff(close, d*)</code> into the Module 11/12 feature
+            pipeline and your model sees a <em>stationary</em> input that still
+            knows where price stands relative to its history. The
+            <code>adf_tstat</code> implementation is the actual Dickey-Fuller
+            regression, derived in the docstring — you should never use a
+            stationarity test you couldn't re-derive.
+          </p>
+        </div>
+
+        <h2>2. Statistical arbitrage: cointegration, half-life, and the Kalman filter</h2>
+        <p>
+          Pairs trading is the cleanest "real quant" strategy family: find two
+          assets whose <em>spread</em> is stationary, bet on the spread
+          mean-reverting, stay market-neutral. Four tools, built from scratch in
+          <code>quantlab/advanced/pairs.py</code>:
+        </p>
+        <ul>
+          <li><strong><code>engle_granger</code></strong> — the two-step
+            cointegration test: OLS of y on x, ADF on the residual. Subtlety
+            most retail code misses: because β was <em>estimated</em>, the
+            residual is biased toward stationarity, so you must use the
+            stricter Engle-Granger critical values (−3.34 at 5%, not −2.86).</li>
+          <li><strong><code>half_life</code></strong> — fit the
+            Ornstein-Uhlenbeck speed (Δs on s<sub>t−1</sub>); half-life =
+            ln 2/θ. It tells you how long divergences take to close — set your
+            z-score window near it, and don't trade pairs whose half-life
+            exceeds your patience.</li>
+          <li><strong><code>rolling_hedge_ratio</code></strong> — causal rolling
+            OLS β.</li>
+          <li><strong><code>KalmanHedge</code></strong> — a 2-state Kalman filter
+            <code>y_t = β_t·x_t + α_t + ε</code> with random-walk states: the
+            optimal <em>online</em> estimator of a drifting hedge ratio,
+            implemented as the textbook predict/update loop so you can read
+            every line.</li>
+        </ul>
+        <div class="code-block" data-filename="pairs_demo.py">
+<textarea class="src">from quantlab.advanced import (engle_granger, half_life, pairs_backtest,
+                              kalman_hedge_ratio)
+
+prov = get_provider("yahoo")
+y = prov.get_ohlcv("QQQ", start="2015-01-01")["close"]
+x = prov.get_ohlcv("SPY", start="2015-01-01")["close"]
+
+eg = engle_granger(y, x)
+print(f"beta={eg['beta']:.2f}  ADF={eg['adf_t']:.2f}  "
+      f"cointegrated@5%={eg['cointegrated_5pct']}")
+print(f"spread half-life: {half_life(eg['residual']):.1f} bars")
+
+res = pairs_backtest(y, x, hedge="rolling", window=250, z_window=30)
+print(res["stats"])</textarea>
+        </div>
+        <div class="callout pitfall">
+          <div class="callout-title">⚠️ The estimation-noise trap (we measured it)</div>
+          <p>
+            Hedge-ratio error multiplies <em>price levels</em>. On a simulated
+            cointegrated pair (true β=2, OU spread std 0.9), a 60-bar rolling
+            hedge had β error ±0.235 — which on a $100 stock injects
+            <strong>±$23 of noise into a $0.90 signal</strong>. The measured
+            spread was 25× noisier than the true one; trading its z-score earned
+            Sharpe ≈ 0. The <em>same</em> data with a 500-bar window earned
+            Sharpe 1.2–1.75. And a <em>fast</em> Kalman (δ=10⁻⁴) was worse than
+            slow OLS — it absorbed the spread into its own state, "explaining
+            away" the very mean-reversion we trade. The rules, encoded in the
+            defaults and pinned by <code>tests/test_frontier.py</code>: long
+            windows for stable relationships; reserve the Kalman for genuinely
+            drifting βs, and slow it down (δ of 10⁻⁶…10⁻⁸).
+          </p>
+        </div>
+
+        <h2>3. Regime detection: markets have states</h2>
+        <p>
+          A strategy's edge is rarely constant — trend-following thrives in calm
+          uptrends and bleeds in chop. We model regimes as Gaussian clusters
+          over (return, volatility) with a mixture model, then relabel components
+          by volatility so <strong>regime 0 is always "calm" and regime k−1
+          "turbulent"</strong> — labels you can write rules against. The trap is
+          look-ahead: a model fitted on the full history <em>knows</em> 2020 was
+          a crash when labeling 2019. Hence two APIs:
+        </p>
+        <div class="code-block" data-filename="regimes_demo.py">
+<textarea class="src">from quantlab.advanced import fit_regimes, causal_regimes, regime_stats
+
+ret = get_provider("yahoo").get_ohlcv("SPY", start="2010-01-01")["close"].pct_change()
+
+# ANALYSIS ONLY (fits on the full sample — loudly not causal):
+labels, _ = fit_regimes(ret, n_regimes=3)
+print(regime_stats(ret, labels).round(3))   # ann_return/vol/sharpe per regime
+
+# STRATEGY-SAFE: the label at bar t comes from a model trained on bars < t
+# (expanding refit). The first min_train bars are NaN — no model existed yet.
+live_labels = causal_regimes(ret, n_regimes=3, min_train=252, refit_every=63)</textarea>
+        </div>
+        <div class="callout better">
+          <div class="callout-title">🧱 The causal-protocol pattern, again</div>
+          <p>
+            <code>causal_regimes</code> is the same discipline as walk-forward ML
+            (Module 12) applied to unsupervised learning — and its test corrupts
+            future returns and asserts earlier labels don't move. When you
+            upgrade to a Hidden Markov Model (adds explicit transition
+            probabilities; <code>hmmlearn</code>), keep the identical expanding
+            protocol. The estimator changes; the honesty doesn't.
+          </p>
+        </div>
+
+        <h2>4. Portfolio construction: Hierarchical Risk Parity</h2>
+        <p>
+          Markowitz mean-variance is famously fragile: it inverts the covariance
+          matrix, so small estimation errors explode into wild, concentrated
+          weights. <strong>HRP</strong> (López de Prado, 2016) never inverts Σ.
+          Three acts: (1) cluster assets by correlation distance
+          √((1−ρ)/2); (2) reorder the covariance matrix so similar assets sit
+          together; (3) split risk top-down through the cluster tree, allocating
+          between siblings inversely to their cluster variances.
+        </p>
+        <div class="code-block" data-filename="hrp_demo.py">
+<textarea class="src">from quantlab.advanced import hrp_weights, inverse_variance, portfolio_backtest
+
+panel = prov.get_ohlcv_multi(["SPY","QQQ","TLT","GLD","XLE","XLF"], start="2015-01-01")
+rets = panel.pivot_table(index="timestamp", columns="symbol", values="close").pct_change()
+
+print(hrp_weights(rets).round(3))           # clusters share risk; no inversion
+
+# Walk-forward comparison — weights from the TRAILING window only (causal):
+for name, fn in [("HRP", hrp_weights), ("inverse-variance", inverse_variance)]:
+    r = portfolio_backtest(rets, weight_fn=fn, lookback=252, rebalance_every=21)
+    print(f"{name:17s} sharpe={r['stats']['sharpe']:.2f} "
+          f"maxDD={r['stats']['max_drawdown']:.1%}")</textarea>
+        </div>
+        <p>
+          The ground-truth test is instructive: give HRP two near-clone assets
+          plus two independent ones (equal volatility). Equal-weight gives the
+          clone <em>pair</em> half the book — double-counting one risk. HRP puts
+          them in one cluster and gives the pair <em>less combined weight than
+          the two independents</em>. That is diversification measured by risk
+          structure, not by line count.
+        </p>
+
+        <h2>5. Sample uniqueness: stop training on the same event twenty times</h2>
+        <p>
+          Triple-barrier labels span <em>intervals</em>, so consecutive labels
+          overlap — twenty labels opened the same week mostly describe one
+          market move. A model trained on them equal-weighted sees one event
+          twenty times: it overfits that episode, and the IID assumption behind
+          CV and bagging quietly breaks. The AFML fix: weight each sample by its
+          <strong>average uniqueness</strong> — the mean of 1/(concurrent labels)
+          over its lifespan.
+        </p>
+        <div class="code-block" data-filename="uniqueness_demo.py">
+<textarea class="src">from quantlab.advanced import uniqueness_from_labels
+from quantlab.ml import triple_barrier_labels, assemble_dataset
+
+close = prov.get_ohlcv("SPY", start="2010-01-01")["close"]
+lab = triple_barrier_labels(close, horizon=10, upper=2.0, lower=2.0)
+u = uniqueness_from_labels(lab, horizon=10)
+print(f"mean uniqueness: {u.mean():.2f}")   # daily overlapping labels: ~0.1-0.3!
+
+# Every sklearn/XGBoost/LightGBM estimator accepts the result directly:
+#   model.fit(X, y, sample_weight=u.reindex(X.index).fillna(0))</textarea>
+        </div>
+        <div class="callout deepdive">
+          <div class="callout-title">🔬 Mean uniqueness ≈ 0.2 is a diagnosis</div>
+          <p>
+            It says your "4,000 training samples" carry roughly 800 samples of
+            independent information. Every overfitting symptom you measured in
+            Modules 10–13 — the IS→OOS gap, the PBO — is partly <em>this</em>,
+            upstream of the model. Concurrency is computed with a difference
+            array (O(n + events)); read the implementation, it's twelve lines.
+          </p>
+        </div>
+
+        <h2>6. Market microstructure &amp; execution: where backtests meet reality</h2>
+        <p>
+          Everything so far assumed your orders fill at the close ± a constant
+          slippage. At small size that's roughly true; at real size, <em>you</em>
+          move the price. The empirical regularity every desk builds on is the
+          <strong>square-root impact law</strong>: trading a quantity Q of an
+          asset with daily volume V and volatility σ moves the price by roughly
+        </p>
+        <div class="code-block" data-filename="impact_model.py">
+<textarea class="src">def expected_impact(Q, V, sigma, Y=0.7):
+    """Square-root market-impact law: ΔP/P ≈ Y · σ · sqrt(Q / V).
+
+    Q: shares you trade; V: average daily volume; sigma: daily vol;
+    Y: an empirical constant near 0.5-1.0. Doubling your size costs you
+    sqrt(2)x more impact PER SHARE — costs grow with size^1.5 in total.
+    This is why capacity, not signal, is what kills most strategies."""
+    return Y * sigma * (Q / V) ** 0.5
+
+# A 1%-of-ADV order in a 2%-vol stock costs ~0.14% of price in impact:
+print(f"{expected_impact(Q=10_000, V=1_000_000, sigma=0.02):.4%}")</textarea>
+        </div>
+        <ul>
+          <li><strong>Execution algorithms</strong> exist to manage that cost:
+            <em>TWAP</em> slices an order evenly through time; <em>VWAP</em>
+            slices proportionally to the typical volume curve; implementation-
+            shortfall algos trade faster when the price moves against you. Our
+            paper broker's <code>rebalance</code> is where such an algo would
+            plug in — the accounting stays identical.</li>
+          <li><strong>Vectorized vs event-driven backtesting:</strong> everything
+            in this course is vectorized — perfect for signals evaluated on
+            bars. The moment fills depend on <em>intra-bar order</em> (limit
+            orders, stops, queue position, partial fills), a vectorized engine
+            cannot represent the question, and you need an event-driven
+            simulator that replays the tape order by order. Know which regime
+            your strategy lives in; using the wrong engine is a silent lie.</li>
+          <li><strong>Bid-ask bounce:</strong> at intraday horizons, trade prices
+            oscillate between bid and ask, manufacturing fake mean-reversion in
+            last-trade data. Mid-quote data, not trades, for microstructure
+            research.</li>
+        </ul>
+
+        <h2>7. Data pitfalls that invalidate everything upstream</h2>
+        <ul>
+          <li><strong>Survivorship bias.</strong> Today's S&amp;P 500 membership
+            backtested over 20 years quietly excludes every company that
+            delisted or collapsed — inflating returns by 1–4% a year. The fix is
+            <em>point-in-time universes</em>: scan the index constituents as
+            they stood on each historical date. Yahoo can't give you this;
+            survivorship-bias-free data (e.g. CRSP, Norgate, Sharadar) is the
+            first thing a serious backtest budget buys.</li>
+          <li><strong>Point-in-time fundamentals.</strong> Earnings get restated.
+            A backtest joining "the" quarterly EPS to historical dates often uses
+            the <em>restated</em> figure the market never saw. As-reported,
+            point-in-time databases exist precisely for this.</li>
+          <li><strong>Corporate actions.</strong> Our data layer uses
+            split/dividend-adjusted closes (total return — correct for signals),
+            but stops, limits, and option strikes live in <em>unadjusted</em>
+            prices. Mixing the two is a classic silent bug; that's why
+            <code>get_ohlcv(adjust=False)</code> exists.</li>
+        </ul>
+
+        <h2>8. Deep learning and reinforcement learning — the honest take</h2>
+        <p>
+          You will be asked about both, so hold a defensible position. On
+          <strong>tabular bar features, gradient-boosted trees remain the
+          benchmark to beat</strong> — financial data's signal-to-noise is so low
+          that the inductive bias of trees usually wins over the flexibility of
+          deep nets. Where deep learning genuinely earns its keep: <em>sequence
+          models over raw order flow</em> (microstructure, where data is
+          plentiful), <em>cross-sectional networks</em> over thousands of assets,
+          and <em>representation learning</em> on alternative data (text, satellite
+          imagery). If you go there, everything from this course transfers:
+          walk-forward training, purged validation, deflated evaluation —
+          deep nets overfit <em>faster</em>, so the honesty machinery matters
+          <em>more</em>. Reinforcement learning's natural home is
+          <strong>execution</strong> (a well-posed, fast-feedback MDP: minimize
+          impact while completing an order), not strategy discovery, where the
+          reward is too sparse and the environment too non-stationary for
+          today's methods to beat the dossier pipeline you already own.
+        </p>
+
+        <div class="callout tryit">
+          <div class="callout-title">🛠️ Try it</div>
+          <p>
+            Run <code>code/m18_frontier.py</code>, then: (1) find the minimal
+            <code>d*</code> for three different asset classes and compare the
+            memory each retains; (2) scan a sector ETF universe for cointegrated
+            pairs with <code>engle_granger</code>, keep only half-lives under 30
+            bars, and feed the best pair to <code>pairs_backtest</code> — then
+            run the result through the Module 13 <strong>dossier</strong>;
+            (3) retrain Module 12's LightGBM with
+            <code>sample_weight=uniqueness</code> and compare the purged-CV AUC
+            with and without. Each exercise composes this module with the
+            honesty machinery from earlier ones — which is the entire point of
+            the course.
+          </p>
+        </div>
+
+        <div class="callout concept">
+          <div class="callout-title">🎓 You are now operating at the frontier</div>
+          <p>
+            Fractional differentiation, cointegration and Kalman hedging with a
+            measured account of estimation noise, causal regime detection, HRP,
+            uniqueness-weighted training, impact-aware execution thinking, and
+            data forensics — on top of a tested package, an honest research
+            pipeline, and a paper-trading loop. What remains between you and the
+            best in the world is not technique: it is data quality, iteration
+            speed, and the discipline to let the dossier say NO-GO. Build,
+            measure, deflate, repeat.
+          </p>
+        </div>
+
+        <div class="lesson-nav" data-lesson-nav></div>
+      </div>
+    </main>
+  </div>
+  <script src="../assets/js/manifest.js"></script>
+  <script src="../assets/js/course.js"></script>
+</body>
+</html>

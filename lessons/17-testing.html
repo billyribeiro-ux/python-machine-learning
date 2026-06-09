@@ -33,9 +33,9 @@
           that fails loudly the day its behavior changes.
         </p>
         <div class="code-block" data-filename="run_tests.sh" data-lang="shell">
-<textarea class="src"># The whole suite runs offline, deterministically, in well under a second:
+<textarea class="src"># The whole suite runs offline, deterministically, in seconds:
 pytest -q
-# 24+ passed, a couple skipped (TA-Lib tests skip cleanly if it's not installed)</textarea>
+# 150+ passed (TA-Lib / optional-library tests skip cleanly when not installed)</textarea>
         </div>
 
         <h2>2. Known-value &amp; cross-implementation tests</h2>
@@ -184,7 +184,7 @@ def test_combo_stats_regression(close):       # `close` = deterministic fixture
             <code>tests/conftest.py</code> synthesizes OHLCV with a <em>seeded</em>
             generator and serves it through a <code>FakeProvider</code> — so the
             whole suite runs without a network, gives the same answer every time,
-            and finishes in well under a second. That's what lets you run it on
+            and finishes in seconds. That's what lets you run it on
             every save and in CI: a slow or flaky suite is a suite people stop
             running.
           </p>
@@ -212,15 +212,15 @@ def test_combo_stats_regression(close):       # `close` = deterministic fixture
         </div>
 
         <div class="callout concept">
-          <div class="callout-title">🎓 You've finished QuantLab</div>
+          <div class="callout-title">🎓 The core curriculum is complete</div>
           <p>
             From the memory layout of a NumPy array to a tuned, walk-forward,
             tested trading system with a live dashboard — you now build
             algorithms, scanners, indicators, backtests, and ML models at depth,
             and you know <em>why</em> each is correct, fast, and free of
             look-ahead. The five habits — vectorize, stabilize, don't peek,
-            reproduce, test — are now yours. Go build something better than what
-            exists.
+            reproduce, test — are now yours. One module remains: the frontier
+            techniques that separate good from world-class.
           </p>
         </div>
 

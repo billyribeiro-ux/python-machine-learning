@@ -50,23 +50,31 @@ def sharpe(returns: pd.Series, periods_per_year: float = 252, rf: float = 0.0) -
     """Annualized Sharpe ratio: excess return per unit of total volatility.
 
     The single most cited risk-adjusted metric. ``rf`` is the per-period
-    risk-free rate (0 is a fine default for short horizons). Returns 0 when
-    volatility is 0 to avoid a division blowup."""
+    risk-free rate (0 is a fine default for short horizons).
+
+    Edge case, handled honestly: zero volatility means the ratio is undefined
+    in the limit. A strategy that never trades (mean 0, std 0) gets 0; a
+    strategy with constant *positive* returns gets +inf — mathematically right,
+    and crucially it can no longer masquerade as "no alpha" in a sweep."""
     excess = returns.dropna() - rf
     sd = excess.std(ddof=1)
     if sd == 0 or np.isnan(sd):
-        return 0.0
+        return float("inf") if excess.mean() > 0 else 0.0
     return float(excess.mean() / sd * np.sqrt(periods_per_year))
 
 
 def sortino(returns: pd.Series, periods_per_year: float = 252, rf: float = 0.0) -> float:
     """Like Sharpe, but penalizes only *downside* volatility — because upside
-    'risk' isn't risk. Uses downside deviation in the denominator."""
+    'risk' isn't risk. Uses downside deviation in the denominator.
+
+    Edge case: a profitable strategy with NO losing periods has zero downside
+    deviation — its Sortino is +inf by definition, and we return exactly that
+    (not 0, which would brand a flawless run as worthless)."""
     excess = returns.dropna() - rf
     downside = excess[excess < 0]
     dd = downside.std(ddof=1)
-    if dd == 0 or np.isnan(dd):
-        return 0.0
+    if len(downside) == 0 or dd == 0 or np.isnan(dd):
+        return float("inf") if excess.mean() > 0 else 0.0
     return float(excess.mean() / dd * np.sqrt(periods_per_year))
 
 

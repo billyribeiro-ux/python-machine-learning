@@ -28,14 +28,15 @@ jobs:
           cache: pip
 
       - name: Install the package + test dependencies
-        # We install only what the test suite needs. Heavy/optional libraries
-        # used by the lesson SCRIPTS (vectorbt, quantstats, streamlit, xgboost,
-        # lightgbm, optuna) and TA-Lib's C library are intentionally NOT required
-        # for tests — TA-Lib-dependent tests skip cleanly via pytest.importorskip.
+        # We install what the test suite needs: optuna is required (the
+        # research-optimizer and strategy-report tests exercise it directly).
+        # Heavier optional libraries used only by lesson SCRIPTS (vectorbt,
+        # quantstats, streamlit, lightgbm) and TA-Lib's C library are NOT
+        # required — tests depending on them skip cleanly via importorskip.
         run: |
           python -m pip install --upgrade pip
           pip install -e .
-          pip install pytest hypothesis scikit-learn numba
+          pip install pytest hypothesis scikit-learn numba optuna xgboost
 
       - name: Run tests
         run: pytest -q

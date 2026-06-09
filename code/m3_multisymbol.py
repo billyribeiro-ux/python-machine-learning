@@ -1,6 +1,6 @@
 """Per-symbol indicators across a whole universe in a single parallel pass.
 
-Run:  python code/m3_multisymbol.py
+Run:  python code/m3_multisymbol.py     (requires polars: pip install polars)
 """
 import polars as pl
 from quantlab.data import get_provider

@@ -1,6 +1,6 @@
 """Build a partitioned parquet 'data lake' and query it with DuckDB.
 
-Run:  python code/m4_build_lake.py
+Run:  python code/m4_build_lake.py      (requires duckdb: pip install duckdb)
 """
 from quantlab.data import get_provider
 from quantlab.data.cache import MarketDataLake

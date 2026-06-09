@@ -48,6 +48,13 @@ def triple_barrier_labels(close: pd.Series,
       * ``ret``       : the realized return at the touched barrier
       * ``touch_idx`` : integer offset (1..horizon) of the touch
     The last ``horizon`` rows are NaN (their outcome isn't fully known yet).
+
+    Causality convention (worth being explicit about): the barriers for the
+    event decided at bar *i* are sized with the volatility computed **through
+    bar i's close** — the same information set the features at bar *i* use.
+    The decision happens at that close; the barrier race begins at *i+1*. No
+    future data enters the barrier sizing (this matches AFML's ``getDailyVol``
+    convention).
     """
     c = close.to_numpy(dtype="float64")
     n = c.shape[0]

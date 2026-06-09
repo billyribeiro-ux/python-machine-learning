@@ -47,7 +47,7 @@ python -m http.server 8000
 ## Running the examples
 
 Every lesson's key example is mirrored as a runnable script in `code/` (one per
-module, `m0`–`m15`):
+module, `m0`–`m18`):
 
 ```bash
 python code/m1_indicators.py   # from-scratch indicators, proven vs pandas
@@ -170,7 +170,7 @@ see `quantlab/data/__init__.py` for Alpaca and CCXT (crypto) sketches.
 
 ```
 index.html              # course home (curriculum + how-to)
-lessons/                # one HTML lesson per module (Modules 0–4 complete)
+lessons/                # one HTML lesson per module (all modules complete)
 assets/                 # shared CSS + JS (Monaco, sidebar, prev/next, progress)
 quantlab/               # the reusable package the course builds
   data/                 #   provider-agnostic data layer + DuckDB data lake
@@ -180,6 +180,9 @@ quantlab/               # the reusable package the course builds
   ml/                   #   features, triple-barrier labels, purged CV, models, optuna
   options/              #   Black-Scholes pricing, Greeks, implied vol
   scanners/             #   multi-symbol swing/momentum scanners
+  research/             #   honest optimization, Deflated Sharpe, PBO/CPCV, dossier
+  live/                 #   paper-trading broker + engine (simulation)
+  advanced/             #   frontier: fracdiff, pairs/Kalman, regimes, HRP, uniqueness
   utils/                #   returns / log-returns / forward returns
 app/streamlit_app.py    # the interactive dashboard (Module 16)
 code/                   # runnable scripts mirroring each lesson's key example
@@ -191,7 +194,7 @@ requirements.txt        # full course deps   |   pyproject.toml: package + extra
 
 ## Course status
 
-**All 18 modules (0–17) are complete, written, and runnable** — Setup, NumPy,
+**All 19 modules (0–18) are complete, written, and runnable** — Setup, NumPy,
 pandas, Polars, DuckDB, TA-Lib, pandas-ta, the unified indicator library, Numba,
 vectorbt, QuantStats, scikit-learn, XGBoost/LightGBM, Optuna, scanners, options,
 Streamlit, and testing. Every module has a narrated lesson, a runnable `code/`

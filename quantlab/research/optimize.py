@@ -167,7 +167,12 @@ def optimize_strategy(
     hold_stats = compute_stats(hold_rets, periods_per_year)
 
     # Deflated Sharpe on the hold-out, penalized by the number of trials and the
-    # dispersion of trial Sharpes (how much "searching" we did).
+    # CROSS-TRIAL dispersion of (train) Sharpe estimates — the right quantity
+    # for E[max of N trials]. Note the deliberate, conservative asymmetry: the
+    # canonical DSR deflates the *in-sample* Sharpe of the selected trial; we
+    # apply the same luck benchmark to the *hold-out* Sharpe instead. The
+    # hold-out wasn't part of the selection, so it needs less deflation — which
+    # makes this a strictly harder bar to clear, never an easier one.
     pp_sharpes = [t.user_attrs.get("pp_sharpe", 0.0)
                   for t in study.trials
                   if t.state.name == "COMPLETE" and "pp_sharpe" in t.user_attrs]

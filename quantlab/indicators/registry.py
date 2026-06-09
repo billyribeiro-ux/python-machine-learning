@@ -83,6 +83,16 @@ def combine(ohlcv: pd.DataFrame, specs: list[tuple[str, dict]],
     """
     parts = [compute_one(ohlcv, name, params) for name, params in specs]
     out = pd.concat(parts, axis=1)
+    # Two specs that generate the same column name (e.g. ("sma", {"window": 20})
+    # twice) would create duplicate columns, and pandas would then silently pick
+    # one in downstream selections. Fail loudly instead — duplicate specs are
+    # always a configuration mistake.
+    dupes = out.columns[out.columns.duplicated()].unique().tolist()
+    if dupes:
+        raise ValueError(
+            f"Duplicate indicator columns from specs: {dupes}. "
+            "Each (name, settings) pair must be unique."
+        )
     if join_input:
         out = ohlcv.join(out)
     return out

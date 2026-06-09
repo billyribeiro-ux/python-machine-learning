@@ -36,6 +36,12 @@ import pandas as pd
 
 from .base import OHLCV_COLUMNS, DataProvider, OHLCVRequest
 
+def _utcnow() -> pd.Timestamp:
+    """Current UTC time — a seam so tests can simulate the passage of days when
+    verifying the cache-freshness behavior below."""
+    return pd.Timestamp.now(tz="UTC")
+
+
 # Map our vocabulary -> yfinance's `interval` strings. They mostly line up, but
 # pinning the mapping explicitly means a change in yfinance can't silently
 # change our behavior.
@@ -69,7 +75,20 @@ class YahooProvider(DataProvider):
         # A stable, collision-resistant filename derived from the request. We
         # hash the request fields so that two different requests can never map
         # to the same file, while the same request always maps to the same one.
-        key = f"{req.symbol}|{req.start}|{req.end}|{req.timeframe}|{req.adjust}"
+        #
+        # Freshness: a request with end=None means "through NOW", so its result
+        # changes as time passes. If we keyed it on end=None alone, the first
+        # fetch would be served forever — the paper-trading engine would read
+        # yesterday's bars every day and never notice. We therefore fold a
+        # freshness bucket into the key: the current UTC date for daily+ bars,
+        # the current UTC hour for intraday. Old buckets simply stop being read
+        # (delete data/cache to reclaim space).
+        end_key = req.end
+        if end_key is None:
+            now = _utcnow()
+            intraday = req.timeframe not in ("1d", "1wk", "1mo")
+            end_key = now.strftime("%Y-%m-%dT%H" if intraday else "%Y-%m-%d")
+        key = f"{req.symbol}|{req.start}|{end_key}|{req.timeframe}|{req.adjust}"
         digest = hashlib.sha1(key.encode()).hexdigest()[:16]
         safe_sym = req.symbol.replace("/", "_").replace("=", "_")
         return self.cache_dir / f"{safe_sym}_{req.timeframe}_{digest}.parquet"

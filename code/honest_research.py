@@ -5,7 +5,7 @@ This is the principal-engineer workflow: search hard, then prove the result is
 more than luck (hold-out + Deflated Sharpe), and never let a model see its own
 test data.
 
-Run:  PYTHONPATH=. python code/honest_research.py
+Run:  PYTHONPATH=. python code/honest_research.py   (requires optuna)
 """
 import warnings
 warnings.filterwarnings("ignore")

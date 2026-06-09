@@ -1,6 +1,6 @@
 """Module 12 — gradient-boosted alpha (XGBoost + LightGBM) and predictions->PnL.
 
-Run:  python code/m12_boosting.py
+Run:  python code/m12_boosting.py   (requires xgboost + lightgbm)
 """
 import numpy as np
 from quantlab.data import get_provider

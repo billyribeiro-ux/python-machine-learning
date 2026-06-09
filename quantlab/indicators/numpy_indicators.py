@@ -27,6 +27,20 @@ from __future__ import annotations
 import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
 
+# Recursive indicators (EWMA, RSI) are genuine loops — Module 8's lesson. We
+# JIT-compile those loops when Numba is available so a 5,000-symbol scanner
+# isn't paying the interpreter tax, and fall back to pure Python (identical
+# numerics, just slower) when it isn't.
+try:  # pragma: no cover - environment dependent
+    from numba import njit as _njit
+
+    def _maybe_njit(fn):
+        return _njit(cache=True)(fn)
+except ImportError:  # pragma: no cover
+
+    def _maybe_njit(fn):
+        return fn
+
 
 def _as_float_array(x) -> np.ndarray:
     """Coerce input (list / pandas Series / ndarray) to a 1-D float64 array.
@@ -62,26 +76,31 @@ def sma(values, window: int) -> np.ndarray:
     return out
 
 
+@_maybe_njit
+def _ewma_kernel(a: np.ndarray, alpha: float) -> np.ndarray:
+    n = a.shape[0]
+    out = np.empty(n)
+    if n == 0:
+        return out
+    out[0] = a[0]
+    for t in range(1, n):
+        out[t] = alpha * a[t] + (1.0 - alpha) * out[t - 1]
+    return out
+
+
 def ewma(values, span: int) -> np.ndarray:
     """Exponentially Weighted Moving Average using the standard recurrence
     ``y_t = alpha * x_t + (1 - alpha) * y_{t-1}`` with ``alpha = 2/(span+1)``.
 
     We seed with the first observation (the common convention) and propagate.
-    Although there is a data dependency between steps, this is still O(n) and,
-    when JIT-compiled (Module 8), runs at C speed. We keep it explicit here
-    because EWMA is *the* recursive indicator and understanding the recurrence
-    unlocks RSI, MACD, ATR, and most "smoothed" indicators.
+    Although there is a data dependency between steps, this is still O(n) and —
+    exactly as Module 8 teaches — the explicit loop is JIT-compiled to machine
+    code when Numba is installed (pure Python otherwise, identical numerics).
+    EWMA is *the* recursive indicator: understanding this recurrence unlocks
+    RSI, MACD, ATR, and most "smoothed" indicators.
     """
     a = _as_float_array(values)
-    n = a.shape[0]
-    out = np.empty(n)
-    if n == 0:
-        return out
-    alpha = 2.0 / (span + 1.0)
-    out[0] = a[0]
-    for t in range(1, n):  # noqa: intentional — taught & JIT'd in Module 8
-        out[t] = alpha * a[t] + (1.0 - alpha) * out[t - 1]
-    return out
+    return _ewma_kernel(a, 2.0 / (span + 1.0))
 
 
 def rolling_std(values, window: int, ddof: int = 0) -> np.ndarray:
@@ -122,40 +141,49 @@ def rolling_zscore(values, window: int, ddof: int = 0) -> np.ndarray:
     return z
 
 
-def rsi(values, window: int = 14) -> np.ndarray:
-    """Wilder's Relative Strength Index.
-
-    Implemented with Wilder's smoothing (an EWMA with ``alpha = 1/window``),
-    which is what TA-Lib uses — so our output matches the de-facto standard
-    while remaining fully transparent. RSI is bounded in [0, 100]; the first
-    ``window`` positions are NaN (warmup).
-    """
-    a = _as_float_array(values)
+@_maybe_njit
+def _rsi_kernel(a: np.ndarray, window: int) -> np.ndarray:
     n = a.shape[0]
     out = np.full(n, np.nan)
     if n <= window:
         return out
-    delta = np.diff(a)
-    gains = np.where(delta > 0, delta, 0.0)
-    losses = np.where(delta < 0, -delta, 0.0)
+    gains = np.empty(n - 1)
+    losses = np.empty(n - 1)
+    for i in range(1, n):
+        d = a[i] - a[i - 1]
+        gains[i - 1] = d if d > 0 else 0.0
+        losses[i - 1] = -d if d < 0 else 0.0
 
     # Seed with the simple average of the first `window` deltas (Wilder).
     avg_gain = gains[:window].mean()
     avg_loss = losses[:window].mean()
     alpha = 1.0 / window
 
-    def _rs_to_rsi(g: float, l: float) -> float:
-        if l == 0:
-            return 100.0
-        rs = g / l
-        return 100.0 - 100.0 / (1.0 + rs)
-
-    out[window] = _rs_to_rsi(avg_gain, avg_loss)
+    if avg_loss == 0:
+        out[window] = 100.0
+    else:
+        out[window] = 100.0 - 100.0 / (1.0 + avg_gain / avg_loss)
     for t in range(window + 1, n):
         avg_gain = (1 - alpha) * avg_gain + alpha * gains[t - 1]
         avg_loss = (1 - alpha) * avg_loss + alpha * losses[t - 1]
-        out[t] = _rs_to_rsi(avg_gain, avg_loss)
+        if avg_loss == 0:
+            out[t] = 100.0
+        else:
+            out[t] = 100.0 - 100.0 / (1.0 + avg_gain / avg_loss)
     return out
+
+
+def rsi(values, window: int = 14) -> np.ndarray:
+    """Wilder's Relative Strength Index.
+
+    Implemented with Wilder's smoothing (an EWMA with ``alpha = 1/window``),
+    which is what TA-Lib uses — so our output matches the de-facto standard
+    while remaining fully transparent. RSI is bounded in [0, 100]; the first
+    ``window`` positions are NaN (warmup). The recursive loop is JIT-compiled
+    when Numba is present (Module 8's lesson applied to Module 1's code).
+    """
+    a = _as_float_array(values)
+    return _rsi_kernel(a, int(window))
 
 
 def true_range(high, low, close) -> np.ndarray:

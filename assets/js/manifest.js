@@ -37,4 +37,6 @@ window.QUANTLAB_MANIFEST = [
   { module: "Putting It Together", id: "15-options",   title: "15 · Options: Chains, IV & Greeks",       status: "ready" },
   { module: "Putting It Together", id: "16-streamlit", title: "16 · Streamlit Trading Dashboard",        status: "ready" },
   { module: "Putting It Together", id: "17-testing",   title: "17 · Testing & Quality at Scale",         status: "ready" },
+
+  { module: "The Frontier",     id: "18-frontier",  title: "18 · The Frontier: World-Class Techniques",  status: "ready" },
 ];

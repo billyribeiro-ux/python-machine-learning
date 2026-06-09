@@ -4,7 +4,7 @@ prints a go/no-go verdict.
 Optimization (hold-out) -> Deflated Sharpe -> PBO -> CPCV fan -> cost
 sensitivity -> decision. This is the final gate before risking capital.
 
-Run:  PYTHONPATH=. python code/strategy_dossier.py
+Run:  PYTHONPATH=. python code/strategy_dossier.py   (requires optuna)
 """
 import warnings
 warnings.filterwarnings("ignore")
